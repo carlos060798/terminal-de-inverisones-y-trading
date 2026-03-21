@@ -9,6 +9,7 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from ui_shared import DARK, kpi
+import ai_engine
 
 # Try FRED
 try:
@@ -350,5 +351,20 @@ def render():
                         title=dict(text="S&P 500 — 1 Año", font=dict(color="#94a3b8", size=13), x=0.5),
                         showlegend=False)
                     st.plotly_chart(fig_sp, use_container_width=True)
+
+            # ── AI MACRO INSIGHT ──
+            providers = ai_engine.get_available_providers()
+            if providers:
+                if st.button("🧠 Insight Macro con IA"):
+                    with st.spinner("Generando insight macro…"):
+                        ai_result = ai_engine.generate_macro_insight(
+                            vix=vix_current,
+                            sp500_ytd=sp_ytd,
+                        )
+                        if ai_result:
+                            st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                        border-radius:14px;padding:20px;color:#c8d6e5;font-size:13px;line-height:1.7;'>
+                              {ai_result}
+                            </div>""", unsafe_allow_html=True)
         else:
             st.warning("No se pudieron obtener datos del VIX.")

@@ -9,6 +9,7 @@ from datetime import date
 import database as db
 from ui_shared import DARK, kpi
 import excel_export
+import ai_engine
 
 
 def render():
@@ -147,6 +148,28 @@ def render():
                               na_rep="Abierta"),
             use_container_width=True, hide_index=True
         )
+        # ── AI TRADE ANALYSIS ──
+        providers = ai_engine.get_available_providers()
+        if providers and not closed.empty:
+            with st.expander("🧠 Análisis IA de Trading"):
+                last_trade = closed.iloc[-1]
+                st.markdown(f"**Última operación cerrada:** {last_trade['ticker']} — P&L: ${last_trade['pnl']:+,.2f}")
+                if st.button("Analizar última operación con IA"):
+                    with st.spinner("Analizando…"):
+                        ai_result = ai_engine.analyze_trade(
+                            ticker=last_trade["ticker"],
+                            trade_type=last_trade["trade_type"],
+                            entry=last_trade["entry_price"],
+                            exit_price=last_trade.get("exit_price"),
+                            pnl=last_trade.get("pnl"),
+                            strategy=last_trade.get("strategy", ""),
+                        )
+                        if ai_result:
+                            st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                        border-radius:14px;padding:20px;color:#c8d6e5;font-size:13px;line-height:1.7;'>
+                              {ai_result}
+                            </div>""", unsafe_allow_html=True)
+
         # ── EXCEL EXPORT ──
         trades_data = db.get_trades()
         if not trades_data.empty:

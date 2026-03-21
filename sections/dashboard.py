@@ -8,6 +8,7 @@ from datetime import datetime
 import database as db
 from ui_shared import DARK, fmt, kpi
 import excel_export
+import ai_engine
 
 try:
     import yfinance as yf
@@ -193,6 +194,38 @@ def render():
             thesis_show.style.map(verdict_color, subset=["Veredicto"]),
             use_container_width=True, hide_index=True
         )
+
+    # ── AI PORTFOLIO INSIGHT ──
+    providers = ai_engine.get_available_providers()
+    if providers and not wl.empty and yf:
+        st.markdown("<div class='sec-title'>Insight IA — Cartera</div>", unsafe_allow_html=True)
+        st.caption(f"🤖 {', '.join(providers)}")
+        if st.button("🧠 Analizar Cartera con IA"):
+            with st.spinner("Analizando cartera con IA…"):
+                positions = []
+                for _, row in wl.iterrows():
+                    try:
+                        price = yf.Ticker(row["ticker"]).fast_info.last_price or 0
+                        pnl_pct = ((price / row["avg_cost"]) - 1) * 100 if row["avg_cost"] > 0 else 0
+                        positions.append({
+                            "ticker": row["ticker"], "shares": row["shares"],
+                            "avg_cost": row["avg_cost"], "current_price": price,
+                            "pnl_pct": pnl_pct, "sector": row.get("sector", ""),
+                        })
+                    except Exception:
+                        positions.append({
+                            "ticker": row["ticker"], "shares": row["shares"],
+                            "avg_cost": row["avg_cost"], "current_price": 0,
+                            "pnl_pct": 0, "sector": row.get("sector", ""),
+                        })
+                ai_result = ai_engine.analyze_portfolio(positions)
+                if ai_result:
+                    st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                border-radius:14px;padding:20px;color:#c8d6e5;font-size:13px;line-height:1.7;'>
+                      {ai_result}
+                    </div>""", unsafe_allow_html=True)
+                else:
+                    st.info("No se pudo generar el análisis IA.")
 
     # ── EXCEL EXPORT ──
     st.markdown("<div class='sec-title'>Exportar Datos</div>", unsafe_allow_html=True)

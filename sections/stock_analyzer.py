@@ -12,6 +12,7 @@ import valuation
 import report_generator
 import translator
 import excel_export
+import ai_engine
 from ui_shared import DARK, IDEAL, score, fmt, kpi
 
 try:
@@ -658,6 +659,32 @@ def render():
                         except Exception as e:
                             st.warning(f"Error obteniendo insider trading: {e}")
 
+                # ── AI ANALYSIS (PDF) ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    providers = ai_engine.get_available_providers()
+                    if providers:
+                        st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)
+                        st.caption(f"🤖 Proveedores: {', '.join(providers)}")
+                        if st.button("🧠 Generar Análisis IA", key="ai_pdf"):
+                            with st.spinner("Generando análisis con IA…"):
+                                ai_result = ai_engine.analyze_stock(
+                                    ticker_name,
+                                    price=fv.get("current_price") if fv else None,
+                                    pe=m.get("pe_ratio"),
+                                    roe=m.get("roe"),
+                                    margin=m.get("profit_margin"),
+                                    revenue_growth=m.get("revenue_growth"),
+                                    debt_equity=debt_eq,
+                                    fair_value=fv.get("avg_fair_value") if fv else None,
+                                )
+                                if ai_result:
+                                    st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                                border-radius:14px;padding:20px;color:#c8d6e5;font-size:13px;line-height:1.7;'>
+                                      {ai_result}
+                                    </div>""", unsafe_allow_html=True)
+                                else:
+                                    st.warning("No se pudo generar el análisis con IA.")
+
                 # ── AUTO-SAVE + REPORT ──
                 st.markdown("---")
                 # Auto-save on first analysis
@@ -760,6 +787,34 @@ def render():
             _render_insider_trading(ticker_solo)
         except Exception as e:
             st.warning(f"Error obteniendo insider trading: {e}")
+
+        # ── AI ANALYSIS (standalone) ──
+        st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)
+        providers = ai_engine.get_available_providers()
+        if providers:
+            st.caption(f"🤖 Proveedores disponibles: {', '.join(providers)}")
+            if st.button("🧠 Generar Análisis IA", key="ai_standalone"):
+                with st.spinner("Generando análisis con IA…"):
+                    ai_price = None
+                    ai_fv = None
+                    try:
+                        if fv_solo and fv_solo.get("current_price"):
+                            ai_price = fv_solo["current_price"]
+                            ai_fv = fv_solo.get("avg_fair_value")
+                    except Exception:
+                        pass
+                    ai_result = ai_engine.analyze_stock(
+                        ticker_solo, price=ai_price, fair_value=ai_fv,
+                    )
+                    if ai_result:
+                        st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                    border-radius:14px;padding:20px;color:#c8d6e5;font-size:13px;line-height:1.7;'>
+                          {ai_result}
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        st.warning("No se pudo generar análisis. Verifica API keys en secrets.toml")
+        else:
+            st.info("Configura API keys (Gemini/Groq/OpenRouter) en secrets.toml para análisis con IA.")
 
     # ── EXCEL EXPORT (analyses) ──
     analyses_data = db.get_stock_analyses()
