@@ -4,6 +4,7 @@ Dashboard privado de inversiones · Streamlit + SQLite + yfinance
 """
 import streamlit as st
 import streamlit.components.v1 as components
+import streamlit_antd_components as sac
 import database as db
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ st.set_page_config(
     page_title="Quantum Retail Terminal",
     page_icon="💎",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── PROFESSIONAL DARK CSS ──────────────────────────────────────────────────────
@@ -31,11 +32,12 @@ st.markdown("""
     background: #000000;
     color: #e2e8f0;
 }
-/* Remove top padding so widgets sit flush */
+/* Remove top padding — full-width panels */
 .main .block-container {
     padding-top: 0.5rem !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+    max-width: 100% !important;
 }
 /* Clean iframes for TradingView widgets */
 iframe {
@@ -53,44 +55,12 @@ header[data-testid="stHeader"] { background: transparent !important; }
 .stDeployButton { display: none !important; }
 
 /* ══════════════════════════════════════════════════════════════
-   SIDEBAR
+   SIDEBAR — hidden (menu moved to top)
    ══════════════════════════════════════════════════════════════ */
-section[data-testid="stSidebar"] {
-    background: #000000 !important;
-    border-right: 1px solid #111111 !important;
-}
-section[data-testid="stSidebar"] > div:first-child {
-    background: transparent !important;
-}
-section[data-testid="stSidebar"] * { color: #8b9cb7 !important; }
-section[data-testid="stSidebar"] .stRadio label { font-size: 14px !important; }
-/* Sidebar collapse/expand buttons — hide Material Symbols text leak */
+section[data-testid="stSidebar"] { display: none !important; }
 button[data-testid="stBaseButton-headerNoPadding"],
-button[kind="headerNoPadding"] {
-    color: #475569 !important;
-}
-/* Hide material icon text for sidebar collapse/expand buttons */
-button[data-testid="stBaseButton-headerNoPadding"] [data-testid="stIconMaterial"],
-button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"] {
-    font-size: 0 !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 20px !important;
-    height: 20px !important;
-}
-button[data-testid="stBaseButton-headerNoPadding"] [data-testid="stIconMaterial"]::before {
-    content: '«';
-    font-family: 'Inter', sans-serif !important;
-    font-size: 18px !important;
-    color: #475569 !important;
-}
-button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::before {
-    content: '☰';
-    font-family: 'Inter', sans-serif !important;
-    font-size: 16px !important;
-    color: #475569 !important;
-}
+button[data-testid="stExpandSidebarButton"] { display: none !important; }
+
 /* Hide material icon text in expander arrows */
 [data-testid="stExpander"] [data-testid="stIconMaterial"] {
     font-size: 0 !important;
@@ -109,26 +79,7 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
     content: '▾';
 }
 
-/* ── Sidebar radio ── */
-[data-testid="stRadio"] > div { gap: 2px !important; }
-[data-testid="stRadio"] label {
-    background: transparent !important;
-    border-radius: 10px !important;
-    padding: 11px 16px !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    border: 1px solid transparent !important;
-}
-[data-testid="stRadio"] label:hover {
-    background: rgba(59,130,246,0.08) !important;
-    border-color: rgba(59,130,246,0.15) !important;
-}
-/* Active radio item */
-[data-testid="stRadio"] label[data-checked="true"],
-[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {
-    background: rgba(59,130,246,0.12) !important;
-    border-color: rgba(59,130,246,0.3) !important;
-}
+/* TOP NAV BAR — handled by Streamlit buttons above */
 
 /* ══════════════════════════════════════════════════════════════
    TOP HEADER BANNER
@@ -614,71 +565,45 @@ components.html("""
 </div>
 """, height=46)
 
-# ── SIDEBAR ────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div style='padding:24px 16px 20px;'>
-      <div style='font-size:20px;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);
-           -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px;
-           letter-spacing:-0.5px;'>💎 Quantum Retail</div>
-      <div style='font-size:14px;font-weight:700;color:#e2e8f0 !important;letter-spacing:0.5px;'>Terminal</div>
-      <div style='font-size:10px;color:#3e5068 !important;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v5.0</div>
-    </div>
-    <hr style='margin:0 16px 16px 16px;border-color:#111111;'>
-    """, unsafe_allow_html=True)
 
-    # Quick ticker search (sincroniza todos los widgets TradingView)
-    _ticker_in = st.text_input("🔍", placeholder="Buscar ticker (ej: AAPL)",
+# Header row: brand + search
+_hdr1, _hdr2 = st.columns([5, 1])
+with _hdr1:
+    st.markdown("<span style='font-size:17px;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.5px;'>💎 Quantum Retail Terminal</span><span style='font-size:10px;color:#3e5068;margin-left:10px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v5.1</span>", unsafe_allow_html=True)
+with _hdr2:
+    _ticker_in = st.text_input("🔍", placeholder="Ticker (ej: AAPL)",
                                 value=st.session_state.get("active_ticker", ""),
                                 label_visibility="collapsed")
     if _ticker_in.strip() and _ticker_in.strip().upper() != st.session_state.get("active_ticker", ""):
         st.session_state.active_ticker = _ticker_in.strip().upper()
 
-    section = st.radio(
-        "", ["🏠  Dashboard",
-             "📄  Analizador de Acciones",
-             "🔍  Market Screener",
-             "🎯  Tesis de Inversión",
-             "👁️  Watchlist & Cartera",
-             "📓  Diario de Trading",
-             "💱  Forex & Índices",
-             "📊  Contexto Macro",
-             "⚙️  Sistema"],
-        label_visibility="collapsed"
-    )
-    st.markdown("""
-    <div style='position:absolute;bottom:20px;left:0;right:0;padding:0 20px;'>
-      <div style='font-size:9px;color:#253040;text-align:center;text-transform:uppercase;letter-spacing:1.5px;'>
-        SQLite · yfinance · Streamlit
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+# ── ANT DESIGN NAVIGATION ─────────────────────────────────────────────────────
+_active = sac.tabs([
+    sac.TabsItem(label="Dashboard", icon="house"),
+    sac.TabsItem(label="Acciones", icon="graph-up-arrow"),
+    sac.TabsItem(label="Screener", icon="search"),
+    sac.TabsItem(label="Tesis", icon="bullseye"),
+    sac.TabsItem(label="Watchlist", icon="eye"),
+    sac.TabsItem(label="Diario", icon="journal-text"),
+    sac.TabsItem(label="Forex", icon="currency-exchange"),
+    sac.TabsItem(label="Macro", icon="bar-chart-line"),
+    sac.TabsItem(label="Backtest", icon="graph-down"),
+    sac.TabsItem(label="Sistema", icon="gear"),
+], color="blue", size="sm", return_index=False)
 
 # ── ROUTING ────────────────────────────────────────────────────────────────────
-if "🏠" in section:
-    from sections.dashboard import render
-    render()
-elif "📄" in section:
-    from sections.stock_analyzer import render
-    render()
-elif "🔍" in section:
-    from sections.screener import render
-    render()
-elif "🎯" in section:
-    from sections.investment_thesis import render
-    render()
-elif "👁️" in section:
-    from sections.watchlist import render
-    render()
-elif "📓" in section:
-    from sections.trading_journal import render
-    render()
-elif "💱" in section:
-    from sections.forex_trading import render
-    render()
-elif "📊" in section:
-    from sections.macro_context import render
-    render()
-elif "⚙️" in section:
-    from sections.system_health import render
-    render()
+_routes = {
+    "Dashboard": "sections.dashboard",
+    "Acciones": "sections.stock_analyzer",
+    "Screener": "sections.screener",
+    "Tesis": "sections.investment_thesis",
+    "Watchlist": "sections.watchlist",
+    "Diario": "sections.trading_journal",
+    "Forex": "sections.forex_trading",
+    "Macro": "sections.macro_context",
+    "Backtest": "sections.backtest",
+    "Sistema": "sections.system_health",
+}
+if _active in _routes:
+    _mod = __import__(_routes[_active], fromlist=["render"])
+    _mod.render()

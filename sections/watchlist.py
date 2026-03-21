@@ -10,7 +10,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import database as db
-from ui_shared import DARK, fmt, kpi
+from ui_shared import DARK, dark_layout, fmt, kpi
+
+try:
+    from pypfopt import EfficientFrontier, risk_models, expected_returns
+    HAS_PYPFOPT = True
+except ImportError:
+    HAS_PYPFOPT = False
+
+try:
+    import pandas_ta as ta
+    HAS_PANDAS_TA = True
+except ImportError:
+    HAS_PANDAS_TA = False
 
 
 def _calc_rsi(series, period=14):
@@ -42,9 +54,9 @@ def render():
     </div>""", unsafe_allow_html=True)
 
     # ── TABS ──
-    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim = st.tabs([
+    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt = st.tabs([
         "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora",
-        "🔗 Correlación", "📅 Earnings", "🎲 Simulación"
+        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización"
     ])
 
     # ══════════════════════════════════════════════════════════════
@@ -257,6 +269,144 @@ def render():
                 fig.update_yaxes(gridcolor="#1a1a1a")
                 fig.update_xaxes(gridcolor="#1a1a1a")
                 st.plotly_chart(fig, use_container_width=True)
+
+        # ── ADVANCED INDICATORS (pandas-ta) ──
+        if HAS_PANDAS_TA:
+            with st.expander("📊 Indicadores Técnicos Avanzados"):
+                adv_ticker = st.selectbox("Ticker para análisis avanzado", tickers2, key="adv_ta_ticker")
+                adv_period = st.selectbox("Período", ["6mo", "1y", "2y"], index=1, key="adv_ta_period")
+
+                adv_indicators = st.multiselect(
+                    "Seleccionar indicadores",
+                    ["Ichimoku Cloud", "ADX", "Stochastic", "ATR", "OBV"],
+                    default=["ADX", "Stochastic"],
+                    key="adv_ta_indicators"
+                )
+
+                if st.button("Calcular Indicadores Avanzados", type="primary", key="adv_ta_btn"):
+                    try:
+                        adv_data = yf.download(adv_ticker, period=adv_period, progress=False)
+                        if hasattr(adv_data.columns, 'levels'):
+                            adv_data.columns = adv_data.columns.get_level_values(0)
+
+                        if adv_data.empty:
+                            st.warning(f"No se encontraron datos para {adv_ticker}")
+                        else:
+                            for indicator in adv_indicators:
+                                if indicator == "Ichimoku Cloud":
+                                    ichi = adv_data.ta.ichimoku(append=False)
+                                    if ichi is not None and len(ichi) == 2:
+                                        ichi_df = ichi[0]
+                                    elif ichi is not None:
+                                        ichi_df = ichi
+                                    else:
+                                        st.warning("No se pudo calcular Ichimoku")
+                                        continue
+
+                                    fig_ichi = go.Figure()
+                                    fig_ichi.add_trace(go.Scatter(x=adv_data.index, y=adv_data["Close"],
+                                        name="Precio", line=dict(color="#e2e8f0", width=1.5)))
+
+                                    # Find the column names dynamically
+                                    cols = ichi_df.columns.tolist()
+                                    span_a_col = [c for c in cols if "ISA" in c]
+                                    span_b_col = [c for c in cols if "ISB" in c]
+                                    tenkan_col = [c for c in cols if "ITS" in c]
+                                    kijun_col = [c for c in cols if "IKS" in c]
+
+                                    if tenkan_col:
+                                        fig_ichi.add_trace(go.Scatter(x=ichi_df.index, y=ichi_df[tenkan_col[0]],
+                                            name="Tenkan-sen", line=dict(color="#60a5fa", width=1)))
+                                    if kijun_col:
+                                        fig_ichi.add_trace(go.Scatter(x=ichi_df.index, y=ichi_df[kijun_col[0]],
+                                            name="Kijun-sen", line=dict(color="#f87171", width=1)))
+                                    if span_a_col and span_b_col:
+                                        fig_ichi.add_trace(go.Scatter(x=ichi_df.index, y=ichi_df[span_a_col[0]],
+                                            name="Senkou A", line=dict(color="#34d399", width=0.5)))
+                                        fig_ichi.add_trace(go.Scatter(x=ichi_df.index, y=ichi_df[span_b_col[0]],
+                                            name="Senkou B", line=dict(color="#f87171", width=0.5),
+                                            fill="tonexty", fillcolor="rgba(52,211,153,0.05)"))
+
+                                    fig_ichi.update_layout(**DARK, height=400,
+                                        title=dict(text=f"Ichimoku Cloud — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                        showlegend=True, legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
+                                    st.plotly_chart(fig_ichi, use_container_width=True)
+
+                                elif indicator == "ADX":
+                                    adx_df = adv_data.ta.adx()
+                                    if adx_df is not None and not adx_df.empty:
+                                        fig_adx = go.Figure()
+                                        adx_cols = adx_df.columns.tolist()
+                                        adx_col = [c for c in adx_cols if "ADX" in c and "DM" not in c]
+                                        dmp_col = [c for c in adx_cols if "DMP" in c]
+                                        dmn_col = [c for c in adx_cols if "DMN" in c]
+
+                                        if adx_col:
+                                            fig_adx.add_trace(go.Scatter(x=adx_df.index, y=adx_df[adx_col[0]],
+                                                name="ADX", line=dict(color="#a78bfa", width=2)))
+                                        if dmp_col:
+                                            fig_adx.add_trace(go.Scatter(x=adx_df.index, y=adx_df[dmp_col[0]],
+                                                name="+DI", line=dict(color="#34d399", width=1)))
+                                        if dmn_col:
+                                            fig_adx.add_trace(go.Scatter(x=adx_df.index, y=adx_df[dmn_col[0]],
+                                                name="-DI", line=dict(color="#f87171", width=1)))
+
+                                        fig_adx.add_hline(y=25, line_dash="dot", line_color="#fbbf24", line_width=0.8,
+                                                          annotation_text="Tendencia fuerte (25)")
+                                        fig_adx.update_layout(**DARK, height=300,
+                                            title=dict(text=f"ADX — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                            showlegend=True, legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
+                                        st.plotly_chart(fig_adx, use_container_width=True)
+
+                                elif indicator == "Stochastic":
+                                    stoch = adv_data.ta.stoch()
+                                    if stoch is not None and not stoch.empty:
+                                        fig_stoch = go.Figure()
+                                        stoch_cols = stoch.columns.tolist()
+                                        k_col = [c for c in stoch_cols if "STOCHk" in c]
+                                        d_col = [c for c in stoch_cols if "STOCHd" in c]
+
+                                        if k_col:
+                                            fig_stoch.add_trace(go.Scatter(x=stoch.index, y=stoch[k_col[0]],
+                                                name="%K", line=dict(color="#60a5fa", width=1.5)))
+                                        if d_col:
+                                            fig_stoch.add_trace(go.Scatter(x=stoch.index, y=stoch[d_col[0]],
+                                                name="%D", line=dict(color="#fbbf24", width=1)))
+
+                                        fig_stoch.add_hline(y=80, line_dash="dot", line_color="#f87171", line_width=0.8, annotation_text="Sobrecompra")
+                                        fig_stoch.add_hline(y=20, line_dash="dot", line_color="#34d399", line_width=0.8, annotation_text="Sobreventa")
+                                        fig_stoch.update_layout(**dark_layout(height=300,
+                                            title=dict(text=f"Stochastic Oscillator — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                            showlegend=True, legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"),
+                                            yaxis=dict(range=[0, 100])))
+                                        st.plotly_chart(fig_stoch, use_container_width=True)
+
+                                elif indicator == "ATR":
+                                    atr = adv_data.ta.atr()
+                                    if atr is not None and not atr.empty:
+                                        fig_atr = go.Figure()
+                                        fig_atr.add_trace(go.Scatter(x=atr.index, y=atr,
+                                            name="ATR", line=dict(color="#fbbf24", width=1.5),
+                                            fill="tozeroy", fillcolor="rgba(251,191,36,0.08)"))
+                                        fig_atr.update_layout(**DARK, height=280,
+                                            title=dict(text=f"ATR (Average True Range) — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                            showlegend=False)
+                                        st.plotly_chart(fig_atr, use_container_width=True)
+
+                                elif indicator == "OBV":
+                                    obv = adv_data.ta.obv()
+                                    if obv is not None and not obv.empty:
+                                        fig_obv = go.Figure()
+                                        fig_obv.add_trace(go.Scatter(x=obv.index, y=obv,
+                                            name="OBV", line=dict(color="#a78bfa", width=1.5),
+                                            fill="tozeroy", fillcolor="rgba(167,139,250,0.08)"))
+                                        fig_obv.update_layout(**DARK, height=280,
+                                            title=dict(text=f"OBV (On Balance Volume) — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                            showlegend=False)
+                                        st.plotly_chart(fig_obv, use_container_width=True)
+
+                    except Exception as e:
+                        st.error(f"Error calculando indicadores: {e}")
 
     # ══════════════════════════════════════════════════════════════
     # TAB 3: BENCHMARK vs S&P500
@@ -664,3 +814,135 @@ def render():
                         sk4.markdown(kpi("Prob. Ganancia", f"{prob_profit:.0f}%", f"de {simulations} sims", "purple"), unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Error en simulación Monte Carlo: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 9: OPTIMIZACIÓN (Efficient Frontier)
+    # ══════════════════════════════════════════════════════════════
+    with tab_opt:
+        try:
+            if not HAS_PYPFOPT:
+                st.warning("Instala `pypfopt` para usar esta sección: `pip install pyportfolioopt`")
+            else:
+                rows = db.get_watchlist()
+                if not rows:
+                    st.info("Agrega al menos 2 tickers a tu watchlist para optimizar la cartera.")
+                else:
+                    tickers = sorted(set(r[1] for r in rows))
+                    if len(tickers) < 2:
+                        st.info("Se necesitan al menos 2 tickers para la optimización de cartera.")
+                    else:
+                        st.subheader("Frontera Eficiente — Optimización de Cartera")
+                        with st.spinner("Descargando precios (2 años)..."):
+                            prices = yf.download(tickers, period="2y", auto_adjust=True)["Close"]
+                            if isinstance(prices, pd.Series):
+                                prices = prices.to_frame()
+                            prices = prices.dropna(axis=1, how="all").dropna()
+
+                        valid_tickers = list(prices.columns)
+                        if len(valid_tickers) < 2:
+                            st.warning("No se pudieron obtener datos suficientes para al menos 2 tickers.")
+                        else:
+                            # Expected returns & covariance
+                            mu = expected_returns.mean_historical_return(prices)
+                            S = risk_models.sample_cov(prices)
+
+                            # Max Sharpe portfolio
+                            ef_sharpe = EfficientFrontier(mu, S)
+                            ef_sharpe.max_sharpe()
+                            w_sharpe = ef_sharpe.clean_weights()
+                            perf_sharpe = ef_sharpe.portfolio_performance(verbose=False)
+
+                            # Min Volatility portfolio
+                            ef_minvol = EfficientFrontier(mu, S)
+                            ef_minvol.min_volatility()
+                            w_minvol = ef_minvol.clean_weights()
+                            perf_minvol = ef_minvol.portfolio_performance(verbose=False)
+
+                            # KPIs for Max Sharpe
+                            k1, k2, k3 = st.columns(3)
+                            k1.markdown(kpi("Retorno Esperado", f"{perf_sharpe[0]*100:.1f}%", "Max Sharpe", "green"), unsafe_allow_html=True)
+                            k2.markdown(kpi("Volatilidad", f"{perf_sharpe[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
+                            k3.markdown(kpi("Sharpe Ratio", f"{perf_sharpe[2]:.2f}", "óptimo", "blue"), unsafe_allow_html=True)
+
+                            # Generate 5000 random portfolios
+                            n_assets = len(valid_tickers)
+                            n_portfolios = 5000
+                            results = np.zeros((n_portfolios, 3))
+                            mu_arr = mu.values
+                            S_arr = S.values
+
+                            np.random.seed(42)
+                            for i in range(n_portfolios):
+                                w = np.random.dirichlet(np.ones(n_assets))
+                                p_ret = np.dot(w, mu_arr)
+                                p_vol = np.sqrt(np.dot(w.T, np.dot(S_arr, w)))
+                                results[i, 0] = p_vol
+                                results[i, 1] = p_ret
+                                results[i, 2] = (p_ret - 0.02) / p_vol  # Sharpe with rf=2%
+
+                            # Scatter plot
+                            fig_ef = go.Figure()
+                            fig_ef.add_trace(go.Scatter(
+                                x=results[:, 0] * 100, y=results[:, 1] * 100,
+                                mode="markers",
+                                marker=dict(size=3, color=results[:, 2], colorscale="Viridis",
+                                            showscale=True, colorbar=dict(title="Sharpe")),
+                                name="Portafolios aleatorios",
+                                hovertemplate="Vol: %{x:.1f}%<br>Ret: %{y:.1f}%<extra></extra>"
+                            ))
+                            # Max Sharpe star
+                            fig_ef.add_trace(go.Scatter(
+                                x=[perf_sharpe[1] * 100], y=[perf_sharpe[0] * 100],
+                                mode="markers", name="Max Sharpe",
+                                marker=dict(symbol="star", size=18, color="#22c55e", line=dict(width=1, color="white"))
+                            ))
+                            # Min Vol star
+                            fig_ef.add_trace(go.Scatter(
+                                x=[perf_minvol[1] * 100], y=[perf_minvol[0] * 100],
+                                mode="markers", name="Min Volatilidad",
+                                marker=dict(symbol="star", size=18, color="#3b82f6", line=dict(width=1, color="white"))
+                            ))
+                            fig_ef.update_layout(
+                                **DARK, height=500,
+                                title=dict(text="Frontera Eficiente — 5000 portafolios simulados",
+                                           font=dict(color="#94a3b8", size=14), x=0.5),
+                                xaxis_title="Volatilidad (%)",
+                                yaxis_title="Retorno Esperado (%)",
+                                legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a")
+                            )
+                            st.plotly_chart(fig_ef, use_container_width=True)
+
+                            # Allocation bar chart
+                            st.markdown("#### Asignación Óptima (Max Sharpe)")
+                            alloc_df = pd.DataFrame({
+                                "Ticker": list(w_sharpe.keys()),
+                                "Peso": [v * 100 for v in w_sharpe.values()]
+                            })
+                            alloc_df = alloc_df[alloc_df["Peso"] > 0.01].sort_values("Peso", ascending=True)
+
+                            fig_alloc = px.bar(alloc_df, x="Peso", y="Ticker", orientation="h",
+                                               text=alloc_df["Peso"].apply(lambda x: f"{x:.1f}%"),
+                                               color="Peso", color_continuous_scale="Viridis")
+                            fig_alloc.update_layout(
+                                **DARK, height=max(300, len(alloc_df) * 35),
+                                xaxis_title="Peso (%)", yaxis_title="",
+                                coloraxis_showscale=False
+                            )
+                            fig_alloc.update_traces(textposition="outside")
+                            st.plotly_chart(fig_alloc, use_container_width=True)
+
+                            # Min Vol comparison
+                            with st.expander("Ver cartera de Mínima Volatilidad"):
+                                mk1, mk2, mk3 = st.columns(3)
+                                mk1.markdown(kpi("Retorno Esperado", f"{perf_minvol[0]*100:.1f}%", "Min Vol", "green"), unsafe_allow_html=True)
+                                mk2.markdown(kpi("Volatilidad", f"{perf_minvol[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
+                                mk3.markdown(kpi("Sharpe Ratio", f"{perf_minvol[2]:.2f}", "", "blue"), unsafe_allow_html=True)
+
+                                alloc_mv = pd.DataFrame({
+                                    "Ticker": list(w_minvol.keys()),
+                                    "Peso (%)": [round(v * 100, 2) for v in w_minvol.values()]
+                                })
+                                alloc_mv = alloc_mv[alloc_mv["Peso (%)"] > 0.01].sort_values("Peso (%)", ascending=False)
+                                st.dataframe(alloc_mv, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.error(f"Error en optimización de cartera: {e}")
