@@ -1,13 +1,20 @@
 """
 sections/screener.py - Market Screener
-Quick scan stocks by fundamental filters using yfinance
+Quick scan stocks by fundamental filters using yfinance & Finviz
 """
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
+import plotly.express as px
 import database as db
 from ui_shared import DARK, fmt, kpi
+
+try:
+    from finvizfinance.screener.overview import Overview
+    HAS_FINVIZ = True
+except ImportError:
+    HAS_FINVIZ = False
 
 # Popular tickers organized by sector
 POPULAR = {
@@ -20,15 +27,8 @@ POPULAR = {
 }
 
 
-def render():
-    st.markdown("""
-    <div class='top-header'>
-      <div>
-        <h1>Market Screener</h1>
-        <p>Filtrado fundamental · Comparación rápida · Selección Value & Growth</p>
-      </div>
-    </div>""", unsafe_allow_html=True)
-
+def _render_yfinance_screener():
+    """Original yfinance-based screener content."""
     # ── INPUT: Tickers ──
     st.markdown("<div class='sec-title'>Selección de Acciones</div>", unsafe_allow_html=True)
     tc1, tc2 = st.columns([2, 1])
@@ -165,7 +165,7 @@ def render():
         df_show = df[display_cols].copy()
 
         st.dataframe(
-            df_show.style.applymap(score_color, subset=["Score"])
+            df_show.style.map(score_color, subset=["Score"])
                    .format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
                             "D/E": "{:.2f}", "PEG": "{:.2f}", "Div %": "{:.2f}%"},
                             na_rep="—"),
@@ -214,3 +214,162 @@ def render():
                     row = df[df["Ticker"] == t].iloc[0]
                     db.add_ticker(t, 0, row["Precio"], row.get("Sector", ""), "Desde screener")
                 st.success(f"{len(add_tickers)} tickers agregados a la watchlist.")
+
+
+def _render_finviz_screener():
+    """Finviz-based screener for faster bulk screening."""
+    if not HAS_FINVIZ:
+        st.warning(
+            "El paquete `finvizfinance` no está instalado. "
+            "Instálalo con: `pip install finvizfinance`"
+        )
+        return
+
+    st.markdown("<div class='sec-title'>Filtros Finviz</div>", unsafe_allow_html=True)
+
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        sector = st.selectbox(
+            "Sector",
+            ["Any", "Technology", "Financial", "Healthcare", "Energy",
+             "Consumer Cyclical", "Consumer Defensive", "Industrials",
+             "Basic Materials", "Communication Services", "Real Estate", "Utilities"],
+            key="fvz_sector",
+        )
+        pe_filter = st.selectbox(
+            "P/E Ratio",
+            ["Any", "Under 5", "Under 10", "Under 15", "Under 20",
+             "Under 25", "Under 30", "Under 40", "Under 50",
+             "Over 5", "Over 10", "Over 15", "Over 20", "Over 50"],
+            key="fvz_pe",
+        )
+    with fc2:
+        mcap_filter = st.selectbox(
+            "Market Cap",
+            ["Any", "+Mega (over $200bln)", "+Large (over $10bln)",
+             "+Mid (over $2bln)", "+Small (over $300mln)",
+             "-Mega (under $200bln)", "-Large (under $10bln)",
+             "-Mid (under $2bln)", "-Small (under $300mln)", "-Micro (under $50mln)"],
+            key="fvz_mcap",
+        )
+        eps_growth = st.selectbox(
+            "EPS Growth Past 5 Years",
+            ["Any", "Over 5%", "Over 10%", "Over 15%", "Over 20%",
+             "Over 25%", "Over 30%"],
+            key="fvz_eps",
+        )
+
+    if st.button("Buscar en Finviz", type="primary", key="fvz_btn"):
+        try:
+            with st.spinner("Consultando Finviz..."):
+                filters: dict = {}
+                if sector != "Any":
+                    filters["Sector"] = sector
+                if mcap_filter != "Any":
+                    filters["Market Cap."] = mcap_filter
+                if pe_filter != "Any":
+                    filters["P/E"] = pe_filter
+                if eps_growth != "Any":
+                    filters["EPS growthpast 5 years"] = eps_growth
+
+                foverview = Overview()
+                foverview.set_filter(filters_dict=filters)
+                df = foverview.screener_view()
+
+            if df is None or df.empty:
+                st.warning("Finviz no devolvió resultados para estos filtros.")
+                return
+
+            st.session_state["finviz_results"] = df
+        except Exception as e:
+            st.error(f"Error al consultar Finviz: {e}")
+            return
+
+    # ── RESULTS ──
+    if "finviz_results" in st.session_state:
+        df = st.session_state["finviz_results"]
+
+        st.markdown("<div class='sec-title'>Resultados Finviz</div>", unsafe_allow_html=True)
+
+        k1, k2, k3 = st.columns(3)
+        k1.markdown(kpi("Acciones encontradas", str(len(df)), "", "blue"), unsafe_allow_html=True)
+
+        if "P/E" in df.columns:
+            pe_col = pd.to_numeric(df["P/E"], errors="coerce")
+            avg_pe = pe_col.dropna().mean()
+            k2.markdown(
+                kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "—", "", "purple"),
+                unsafe_allow_html=True,
+            )
+        else:
+            k2.markdown(kpi("P/E Promedio", "—", "", "purple"), unsafe_allow_html=True)
+
+        if "Price" in df.columns:
+            price_col = pd.to_numeric(df["Price"], errors="coerce")
+            avg_price = price_col.dropna().mean()
+            k3.markdown(
+                kpi("Precio Promedio", f"${avg_price:.2f}" if pd.notna(avg_price) else "—", "", "green"),
+                unsafe_allow_html=True,
+            )
+        else:
+            k3.markdown(kpi("Precio Promedio", "—", "", "green"), unsafe_allow_html=True)
+
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # ── HEATMAP: P/E by Sector ──
+        if "P/E" in df.columns and "Sector" in df.columns:
+            st.markdown("<div class='sec-title'>Heatmap: P/E por Sector</div>", unsafe_allow_html=True)
+            try:
+                heat_df = df[["Ticker", "Sector", "P/E"]].copy()
+                heat_df["P/E"] = pd.to_numeric(heat_df["P/E"], errors="coerce")
+                heat_df = heat_df.dropna(subset=["P/E"])
+
+                if not heat_df.empty:
+                    pivot = heat_df.groupby("Sector")["P/E"].mean().reset_index()
+                    pivot.columns = ["Sector", "Avg P/E"]
+                    pivot = pivot.sort_values("Avg P/E", ascending=True)
+
+                    fig_heat = px.bar(
+                        pivot,
+                        x="Avg P/E",
+                        y="Sector",
+                        orientation="h",
+                        color="Avg P/E",
+                        color_continuous_scale=["#34d399", "#fbbf24", "#f87171"],
+                        text=pivot["Avg P/E"].apply(lambda v: f"{v:.1f}"),
+                    )
+                    fig_heat.update_layout(
+                        **DARK,
+                        height=max(300, len(pivot) * 45),
+                        title=dict(
+                            text="P/E Promedio por Sector",
+                            font=dict(color="#94a3b8", size=13),
+                            x=0.5,
+                        ),
+                        coloraxis_showscale=False,
+                        showlegend=False,
+                    )
+                    fig_heat.update_traces(textposition="outside", textfont=dict(color="#94a3b8", size=10))
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                else:
+                    st.info("No hay datos numéricos de P/E para generar el heatmap.")
+            except Exception as e:
+                st.warning(f"No se pudo generar el heatmap: {e}")
+
+
+def render():
+    st.markdown("""
+    <div class='top-header'>
+      <div>
+        <h1>Market Screener</h1>
+        <p>Filtrado fundamental · Comparación rápida · Selección Value & Growth</p>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    tab_yf, tab_fvz = st.tabs(["📊 yfinance Screener", "🔍 Finviz Screener"])
+
+    with tab_yf:
+        _render_yfinance_screener()
+
+    with tab_fvz:
+        _render_finviz_screener()

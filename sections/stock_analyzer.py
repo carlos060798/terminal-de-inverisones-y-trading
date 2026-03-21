@@ -698,6 +698,69 @@ def render():
                 import traceback
                 st.code(traceback.format_exc())
 
+    # ══════════════════════════════════════════════════════════════
+    # STANDALONE TICKER ANALYSIS (without PDF)
+    # ══════════════════════════════════════════════════════════════
+    if not uploaded and manual_ticker and manual_ticker.strip():
+        ticker_solo = manual_ticker.strip().upper()
+        st.markdown(f"""
+        <div style='background:linear-gradient(135deg,#0d1f35,#0a1628);border:1px solid #1e3a5f;
+                    border-radius:14px;padding:24px 28px;margin-bottom:20px;'>
+          <div style='font-size:28px;font-weight:700;color:#f0f6ff;'>{ticker_solo}</div>
+          <div style='font-size:13px;color:#64748b;margin-top:4px;'>Análisis rápido por ticker · Sin PDF</div>
+        </div>""", unsafe_allow_html=True)
+
+        # ── TradingView Chart ──
+        st.markdown("<div class='sec-title'>Chart en Tiempo Real</div>", unsafe_allow_html=True)
+        try:
+            _tradingview_chart(ticker_solo)
+        except Exception:
+            st.info("No se pudo cargar el chart de TradingView.")
+
+        # ── Fair Value ──
+        with st.spinner("Calculando Fair Value…"):
+            fv_solo = valuation.compute_fair_values(ticker_solo, {})
+        if fv_solo and fv_solo.get("avg_fair_value"):
+            st.markdown("<div class='sec-title'>Fair Value & Semáforo</div>", unsafe_allow_html=True)
+            fv_cols = st.columns(4)
+            sig_colors = {"green": "#34d399", "yellow": "#fbbf24", "red": "#f87171"}
+            sig_labels = {"undervalued": "INFRAVALORADA", "fair": "VALOR JUSTO", "overvalued": "SOBREVALORADA"}
+            sig_bg = {"green": "#064e3b", "yellow": "#422006", "red": "#451a03"}
+            sc_fv = fv_solo.get("signal_color") or "yellow"
+            fv_cols[0].markdown(kpi("Precio Actual", f"${fv_solo['current_price']:,.2f}", "", "blue"), unsafe_allow_html=True)
+            if fv_solo.get("pe_fair_value"):
+                fv_cols[1].markdown(kpi("FV Múltiplos", f"${fv_solo['pe_fair_value']:,.2f}", "", "purple"), unsafe_allow_html=True)
+            if fv_solo.get("dcf_fair_value"):
+                fv_cols[2].markdown(kpi("FV DCF", f"${fv_solo['dcf_fair_value']:,.2f}", "", "purple"), unsafe_allow_html=True)
+            fv_cols[3].markdown(f"""
+            <div style='background:{sig_bg[sc_fv]};border:2px solid {sig_colors[sc_fv]};border-radius:14px;
+                        padding:16px;text-align:center;'>
+              <div style='font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;'>Señal</div>
+              <div style='font-size:22px;font-weight:800;color:{sig_colors[sc_fv]};'>{sig_labels.get(fv_solo['signal'],'')}</div>
+              <div style='font-size:13px;color:#64748b;'>FV Prom: ${fv_solo["avg_fair_value"]:,.2f} ({fv_solo["upside_pct"]:+.1f}%)</div>
+            </div>""", unsafe_allow_html=True)
+
+        # ── Buffett/Dorsey Checklist ──
+        st.markdown("<div class='sec-title'>Checklist Buffett/Dorsey</div>", unsafe_allow_html=True)
+        try:
+            _render_quality_score(ticker_solo)
+        except Exception as e:
+            st.warning(f"Error calculando quality score: {e}")
+
+        # ── DCF Scenarios ──
+        st.markdown("<div class='sec-title'>DCF — 3 Escenarios</div>", unsafe_allow_html=True)
+        try:
+            _render_dcf_scenarios(ticker_solo)
+        except Exception as e:
+            st.warning(f"Error calculando escenarios DCF: {e}")
+
+        # ── Insider Trading ──
+        st.markdown("<div class='sec-title'>Insider Trading</div>", unsafe_allow_html=True)
+        try:
+            _render_insider_trading(ticker_solo)
+        except Exception as e:
+            st.warning(f"Error obteniendo insider trading: {e}")
+
     # ── EXCEL EXPORT (analyses) ──
     analyses_data = db.get_stock_analyses()
     if not analyses_data.empty:
