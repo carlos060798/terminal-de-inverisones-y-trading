@@ -5,13 +5,22 @@ Dark theme constants, formatters, KPI card builders.
 import pandas as pd
 
 DARK = dict(
-    paper_bgcolor="#070b14",
-    plot_bgcolor="#0f1923",
+    paper_bgcolor="#000000",
+    plot_bgcolor="#0a0a0a",
     font=dict(color="#94a3b8", size=12, family="Inter"),
-    xaxis=dict(gridcolor="#1e2d40", linecolor="#1e2d40", zerolinecolor="#1e2d40"),
-    yaxis=dict(gridcolor="#1e2d40", linecolor="#1e2d40", zerolinecolor="#1e2d40"),
+    xaxis=dict(gridcolor="#1a1a1a", linecolor="#1a1a1a", zerolinecolor="#1a1a1a"),
+    yaxis=dict(gridcolor="#1a1a1a", linecolor="#1a1a1a", zerolinecolor="#1a1a1a"),
     margin=dict(l=16, r=16, t=24, b=16),
 )
+
+
+def dark_layout(**overrides):
+    """DARK theme con overrides. Elimina keys conflictivas antes de merge."""
+    base = dict(DARK)
+    for key in overrides:
+        base.pop(key, None)
+    base.update(overrides)
+    return base
 
 IDEAL = {
     "revenue_growth": {"min": 10,  "label": "Crec. Ingresos",  "unit": "%",  "higher": True},

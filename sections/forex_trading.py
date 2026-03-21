@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date
 import database as db
-from ui_shared import DARK, kpi
+from ui_shared import DARK, dark_layout, kpi
 
 
 FOREX_PAIRS = [
@@ -161,10 +161,10 @@ def render():
     fig_eq.add_trace(go.Bar(x=eq["trade_date"], y=eq["pnl"],
         marker_color=eq["color"], name="P&L", opacity=0.6, yaxis="y2"))
     fig_eq.add_hline(y=0, line_dash="dot", line_color="#334155")
-    fig_eq.update_layout(**DARK, height=300,
-        yaxis=dict(title="P&L Acumulado", gridcolor="#1e2d40"),
+    fig_eq.update_layout(**dark_layout(height=300,
+        yaxis=dict(title="P&L Acumulado", gridcolor="#1a1a1a"),
         yaxis2=dict(title="P&L Trade", overlaying="y", side="right", showgrid=False),
-        legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40", font=dict(size=11)))
+        legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a", font=dict(size=11))))
     st.plotly_chart(fig_eq, use_container_width=True)
 
     # ── ANALYTICS ──
@@ -227,7 +227,7 @@ def render():
         return "color:#34d399" if v >= 0 else "color:#f87171"
 
     st.dataframe(
-        show.style.applymap(clr_pnl, subset=["Pips", "P&L $"])
+        show.style.map(clr_pnl, subset=["Pips", "P&L $"])
                  .format({"Entrada": "{:.5f}", "Salida": "{:.5f}",
                           "Pips": "{:+.1f}", "P&L $": "${:+,.2f}", "Lotes": "{:.2f}"},
                           na_rep="Abierta"),

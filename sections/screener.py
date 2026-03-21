@@ -4,6 +4,7 @@ Quick scan stocks by fundamental filters using yfinance & Finviz
 """
 import streamlit as st
 import pandas as pd
+import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
@@ -138,6 +139,43 @@ def _render_yfinance_screener():
             return
 
         df = pd.DataFrame(results).sort_values("Score", ascending=False)
+
+        # ── QUANT SCORE (Multi-Factor: Value + Quality + Growth + Momentum + Safety) ──
+        try:
+            if len(df) >= 2:
+                # Value: lower P/E is better (rank ascending, best = highest rank)
+                pe_vals = df["P/E"].fillna(df["P/E"].max() if df["P/E"].notna().any() else 999)
+                df["_pe_rank"] = pe_vals.rank(ascending=True, pct=True) * 20
+
+                # Quality: higher ROE is better
+                df["_roe_rank"] = df["ROE %"].rank(ascending=True, pct=True) * 20
+
+                # Growth: higher revenue growth is better
+                df["_rev_rank"] = df["Crec Rev %"].rank(ascending=True, pct=True) * 20
+
+                # Momentum: higher earnings growth is better
+                df["_earn_rank"] = df["Crec Earn %"].rank(ascending=True, pct=True) * 20
+
+                # Safety: lower D/E is better
+                de_vals = df["D/E"].fillna(df["D/E"].max() if df["D/E"].notna().any() else 5)
+                df["_de_rank"] = de_vals.rank(ascending=False, pct=True) * 20
+
+                df["Quant"] = (
+                    df["_pe_rank"].fillna(0) +
+                    df["_roe_rank"].fillna(0) +
+                    df["_rev_rank"].fillna(0) +
+                    df["_earn_rank"].fillna(0) +
+                    df["_de_rank"].fillna(0)
+                ).round(0).astype(int)
+
+                # Drop temp columns
+                df = df.drop(columns=[c for c in df.columns if c.startswith("_")])
+            else:
+                df["Quant"] = 50  # Single stock gets neutral score
+        except Exception:
+            df["Quant"] = None
+
+        df = df.sort_values("Quant", ascending=False, na_position="last")
         st.session_state["screener_results"] = df
 
     # ── RESULTS ──
@@ -160,13 +198,29 @@ def _render_yfinance_screener():
                 return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
             return "background-color: rgba(248,113,113,0.1); color: #f87171"
 
+        # Quant score color
+        def quant_color(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return "color:#475569"
+            if v >= 75:
+                return "background-color: rgba(52,211,153,0.2); color: #34d399; font-weight: 700"
+            elif v >= 50:
+                return "background-color: rgba(96,165,250,0.15); color: #60a5fa"
+            elif v >= 30:
+                return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
+            return "background-color: rgba(248,113,113,0.15); color: #f87171"
+
         display_cols = ["Ticker", "Empresa", "Sector", "Precio", "P/E", "P/E Fwd",
-                        "ROE %", "Margen %", "D/E", "PEG", "Div %", "Crec Rev %", "Score"]
-        df_show = df[display_cols].copy()
+                        "ROE %", "Margen %", "D/E", "PEG", "Div %", "Crec Rev %", "Score", "Quant"]
+        available_cols = [c for c in display_cols if c in df.columns]
+        df_show = df[available_cols].copy()
+
+        style_obj = df_show.style.map(score_color, subset=["Score"])
+        if "Quant" in df_show.columns:
+            style_obj = style_obj.map(quant_color, subset=["Quant"])
 
         st.dataframe(
-            df_show.style.map(score_color, subset=["Score"])
-                   .format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
+            style_obj.format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
                             "D/E": "{:.2f}", "PEG": "{:.2f}", "Div %": "{:.2f}%"},
                             na_rep="—"),
             use_container_width=True, hide_index=True
@@ -357,6 +411,125 @@ def _render_finviz_screener():
                 st.warning(f"No se pudo generar el heatmap: {e}")
 
 
+HEATMAP_TICKERS = {
+    "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN"],
+    "Healthcare": ["JNJ", "UNH", "PFE", "LLY", "ABBV", "MRK"],
+    "Finance": ["JPM", "BAC", "GS", "V", "MA", "BRK-B"],
+    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC"],
+    "Consumer": ["WMT", "PG", "KO", "PEP", "COST", "MCD"],
+    "Industrial": ["CAT", "HON", "UNP", "RTX", "DE", "GE"],
+}
+
+
+def _render_sector_heatmap():
+    """FinViz-style sector heatmap using treemap colored by daily change %."""
+    try:
+        st.markdown("<div class='sec-title'>Sector Heatmap — Cambio Diario %</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                    border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+          Mapa de calor estilo FinViz. El tamaño representa la capitalización de mercado relativa.
+          El color indica el cambio porcentual del día: <span style='color:#34d399'>verde = positivo</span>,
+          <span style='color:#f87171'>rojo = negativo</span>.
+        </div>""", unsafe_allow_html=True)
+
+        if st.button("Cargar Sector Heatmap", type="primary", key="heatmap_btn"):
+            # Flatten tickers
+            all_tickers = []
+            ticker_sector = {}
+            for sector, ticks in HEATMAP_TICKERS.items():
+                for t in ticks:
+                    all_tickers.append(t)
+                    ticker_sector[t] = sector
+
+            with st.spinner(f"Descargando datos de {len(all_tickers)} acciones…"):
+                hm_rows = []
+                for tk in all_tickers:
+                    try:
+                        obj = yf.Ticker(tk)
+                        fi = obj.fast_info
+                        hist = obj.history(period="2d")
+                        price = fi.last_price or 0
+                        prev = hist["Close"].iloc[-2] if len(hist) >= 2 else price
+                        chg = ((price - prev) / prev * 100) if prev else 0
+                        mcap = fi.market_cap or 1e9
+                        hm_rows.append({
+                            "Ticker": tk,
+                            "Sector": ticker_sector[tk],
+                            "Cambio %": round(chg, 2),
+                            "Mkt Cap": mcap,
+                            "Precio": round(price, 2),
+                        })
+                    except Exception:
+                        hm_rows.append({
+                            "Ticker": tk,
+                            "Sector": ticker_sector[tk],
+                            "Cambio %": 0,
+                            "Mkt Cap": 1e9,
+                            "Precio": 0,
+                        })
+
+            hm_df = pd.DataFrame(hm_rows)
+            hm_df["abs_mcap"] = hm_df["Mkt Cap"].abs()
+            hm_df["Label"] = hm_df.apply(
+                lambda r: f"{r['Ticker']}<br>{r['Cambio %']:+.2f}%", axis=1
+            )
+
+            # Treemap
+            fig_tm = px.treemap(
+                hm_df,
+                path=["Sector", "Ticker"],
+                values="abs_mcap",
+                color="Cambio %",
+                color_continuous_scale=["#dc2626", "#7f1d1d", "#1a1a1a", "#064e3b", "#059669"],
+                color_continuous_midpoint=0,
+                custom_data=["Cambio %", "Precio"],
+            )
+            fig_tm.update_traces(
+                texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}%",
+                textfont=dict(size=12),
+            )
+            fig_tm.update_layout(
+                paper_bgcolor="#000000",
+                plot_bgcolor="#0a0a0a",
+                font=dict(color="#94a3b8", size=12),
+                margin=dict(l=4, r=4, t=36, b=4),
+                height=550,
+                title=dict(text="Sector Heatmap — Cambio Diario", font=dict(color="#94a3b8", size=14), x=0.5),
+                coloraxis_colorbar=dict(
+                    title="Cambio %",
+                    ticksuffix="%",
+                    bgcolor="#0a0a0a",
+                    bordercolor="#1a1a1a",
+                ),
+            )
+            st.plotly_chart(fig_tm, use_container_width=True)
+
+            # Summary table
+            st.markdown("<div class='sec-title'>Resumen por Sector</div>", unsafe_allow_html=True)
+            sector_summary = hm_df.groupby("Sector").agg(
+                Tickers=("Ticker", "count"),
+                **{"Cambio Prom %": ("Cambio %", "mean")},
+                **{"Mejor": ("Cambio %", "max")},
+                **{"Peor": ("Cambio %", "min")},
+            ).round(2).reset_index()
+            sector_summary = sector_summary.sort_values("Cambio Prom %", ascending=False)
+
+            def sect_clr(v):
+                if isinstance(v, (int, float)) and not pd.isna(v):
+                    return "color:#34d399" if v >= 0 else "color:#f87171"
+                return "color:#475569"
+
+            st.dataframe(
+                sector_summary.style.map(sect_clr, subset=["Cambio Prom %", "Mejor", "Peor"])
+                    .format({"Cambio Prom %": "{:+.2f}%", "Mejor": "{:+.2f}%", "Peor": "{:+.2f}%"}),
+                use_container_width=True, hide_index=True,
+            )
+
+    except Exception as e:
+        st.error(f"Error al generar el heatmap: {e}")
+
+
 def render():
     st.markdown("""
     <div class='top-header'>
@@ -366,10 +539,13 @@ def render():
       </div>
     </div>""", unsafe_allow_html=True)
 
-    tab_yf, tab_fvz = st.tabs(["📊 yfinance Screener", "🔍 Finviz Screener"])
+    tab_yf, tab_fvz, tab_heatmap = st.tabs(["📊 yfinance Screener", "🔍 Finviz Screener", "🗺️ Sector Heatmap"])
 
     with tab_yf:
         _render_yfinance_screener()
 
     with tab_fvz:
         _render_finviz_screener()
+
+    with tab_heatmap:
+        _render_sector_heatmap()

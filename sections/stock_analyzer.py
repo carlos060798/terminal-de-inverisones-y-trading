@@ -13,7 +13,7 @@ import report_generator
 import translator
 import excel_export
 import ai_engine
-from ui_shared import DARK, IDEAL, score, fmt, kpi
+from ui_shared import DARK, dark_layout, IDEAL, score, fmt, kpi
 
 try:
     from finvizfinance.quote import finvizfinance as fvz_quote
@@ -27,13 +27,13 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# TradingView Widget
+# TradingView Widgets Ecosystem
 # ---------------------------------------------------------------------------
-def _tradingview_chart(ticker: str, height: int = 500):
-    """Embed free TradingView Advanced Chart widget."""
+def _tradingview_chart(ticker: str, height: int = 550):
+    """Embed TradingView Advanced Chart with drawing tools, studies, fundamentals."""
     html = f"""
     <div class="tradingview-widget-container" style="height:{height}px;width:100%;">
-      <div id="tradingview_chart" style="height:100%;width:100%;"></div>
+      <div id="tradingview_advanced" style="height:100%;width:100%;"></div>
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
       new TradingView.widget({{
@@ -44,18 +44,370 @@ def _tradingview_chart(ticker: str, height: int = 500):
         "theme": "dark",
         "style": "1",
         "locale": "es",
-        "toolbar_bg": "#0f1923",
+        "toolbar_bg": "#000000",
         "enable_publishing": false,
         "hide_side_toolbar": false,
         "allow_symbol_change": true,
-        "container_id": "tradingview_chart",
-        "backgroundColor": "rgba(15,25,35,1)",
-        "gridColor": "rgba(30,45,64,0.3)"
+        "details": true,
+        "hotlist": true,
+        "calendar": true,
+        "studies": ["STD;Bollinger_Bands", "STD;MACD", "STD;RSI"],
+        "show_popup_button": true,
+        "popup_width": "1000",
+        "popup_height": "650",
+        "container_id": "tradingview_advanced",
+        "backgroundColor": "rgba(0,0,0,1)",
+        "gridColor": "rgba(20,20,20,0.3)"
       }});
       </script>
     </div>
     """
     components.html(html, height=height + 10)
+
+
+def _tradingview_analyst_insights(ticker: str):
+    """Symbol Info + Technical Analysis Gauge side by side."""
+    col1, col2 = st.columns(2)
+    with col1:
+        html_info = f"""
+        <div class="tradingview-widget-container">
+          <div class="tradingview-widget-container__widget"></div>
+          <script type="text/javascript"
+            src="https://s3.tradingview.com/external-embedding/embed-widget-symbol-info.js" async>
+          {{
+            "symbol": "{ticker}",
+            "width": "100%",
+            "locale": "es",
+            "colorTheme": "dark",
+            "isTransparent": true
+          }}
+          </script>
+        </div>
+        """
+        components.html(html_info, height=220)
+    with col2:
+        html_ta = f"""
+        <div class="tradingview-widget-container">
+          <div class="tradingview-widget-container__widget"></div>
+          <script type="text/javascript"
+            src="https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js" async>
+          {{
+            "interval": "1D",
+            "width": "100%",
+            "isTransparent": true,
+            "height": 210,
+            "symbol": "{ticker}",
+            "showIntervalTabs": true,
+            "displayMode": "single",
+            "locale": "es",
+            "colorTheme": "dark"
+          }}
+          </script>
+        </div>
+        """
+        components.html(html_ta, height=220)
+
+
+def _tradingview_news(ticker: str):
+    """Timeline widget — institutional news feed for the active ticker."""
+    html_news = f"""
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <script type="text/javascript"
+        src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js" async>
+      {{
+        "feedMode": "symbol",
+        "symbol": "{ticker}",
+        "isTransparent": true,
+        "displayMode": "regular",
+        "width": "100%",
+        "height": 400,
+        "colorTheme": "dark",
+        "locale": "es"
+      }}
+      </script>
+    </div>
+    """
+    components.html(html_news, height=410)
+
+
+# ---------------------------------------------------------------------------
+# Margin of Safety Card
+# ---------------------------------------------------------------------------
+def _margin_of_safety_card(current_price, fair_value, ticker):
+    """Compara precio actual vs Fair Value. Alerta institucional si margen >= 20%."""
+    if not current_price or not fair_value or fair_value <= 0:
+        return
+    margin = ((fair_value - current_price) / fair_value) * 100
+    discount = ((fair_value - current_price) / current_price) * 100
+    if margin >= 20:
+        st.markdown(f"""
+        <div style='background:linear-gradient(135deg, rgba(0,80,40,0.4), rgba(0,60,30,0.6));
+                    border:2px solid #34d399; border-radius:14px; padding:24px;
+                    text-align:center;'>
+          <div style='font-size:11px;color:#34d399;text-transform:uppercase;letter-spacing:2px;
+                      font-weight:700;'>⚡ OPORTUNIDAD DE COMPRA INSTITUCIONAL ⚡</div>
+          <div style='font-size:36px;font-weight:800;color:#34d399;margin:8px 0;'>
+            {margin:.1f}% MARGEN DE SEGURIDAD</div>
+          <div style='display:flex;justify-content:center;gap:40px;margin-top:12px;'>
+            <div><span style='color:#64748b;font-size:11px;'>PRECIO ACTUAL</span><br>
+                 <span style='color:#f0f6ff;font-size:20px;font-weight:700;'>${current_price:,.2f}</span></div>
+            <div><span style='color:#64748b;font-size:11px;'>FAIR VALUE</span><br>
+                 <span style='color:#34d399;font-size:20px;font-weight:700;'>${fair_value:,.2f}</span></div>
+            <div><span style='color:#64748b;font-size:11px;'>UPSIDE POTENCIAL</span><br>
+                 <span style='color:#34d399;font-size:20px;font-weight:700;'>+{discount:,.1f}%</span></div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif margin >= 0:
+        st.markdown(f"""
+        <div style='background:rgba(66,32,6,0.4);border:1px solid #fbbf24;border-radius:14px;
+                    padding:20px;text-align:center;'>
+          <div style='font-size:11px;color:#fbbf24;text-transform:uppercase;letter-spacing:1.5px;
+                      font-weight:600;'>DESCUENTO MODERADO</div>
+          <div style='font-size:28px;font-weight:700;color:#fbbf24;margin:6px 0;'>
+            {margin:.1f}% margen</div>
+          <div style='color:#94a3b8;font-size:13px;'>
+            Precio: ${current_price:,.2f} · Fair Value: ${fair_value:,.2f}</div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style='background:rgba(69,26,3,0.4);border:1px solid #f87171;border-radius:14px;
+                    padding:20px;text-align:center;'>
+          <div style='font-size:11px;color:#f87171;text-transform:uppercase;letter-spacing:1.5px;
+                      font-weight:600;'>SOBREVALORADO</div>
+          <div style='font-size:28px;font-weight:700;color:#f87171;margin:6px 0;'>
+            {abs(margin):.1f}% sobre Fair Value</div>
+          <div style='color:#94a3b8;font-size:13px;'>
+            Precio: ${current_price:,.2f} · Fair Value: ${fair_value:,.2f}</div>
+        </div>""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Snowflake Radar (Simply Wall St style)
+# ---------------------------------------------------------------------------
+SECTOR_PEERS = {
+    "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN", "CRM", "ADBE"],
+    "Healthcare": ["JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "TMO", "ABT"],
+    "Financial Services": ["JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "SCHW"],
+    "Financials": ["JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "SCHW"],
+    "Consumer Cyclical": ["TSLA", "AMZN", "HD", "NKE", "MCD", "SBUX", "TGT", "LOW"],
+    "Consumer Defensive": ["PG", "KO", "PEP", "WMT", "COST", "CL", "MDLZ", "GIS"],
+    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO"],
+    "Industrials": ["CAT", "HON", "UNP", "BA", "GE", "RTX", "DE", "LMT"],
+    "Communication Services": ["GOOGL", "META", "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS"],
+    "Utilities": ["NEE", "DUK", "SO", "D", "AEP", "SRE", "EXC", "XEL"],
+    "Real Estate": ["AMT", "PLD", "CCI", "EQIX", "SPG", "O", "PSA", "DLR"],
+    "Basic Materials": ["LIN", "APD", "SHW", "ECL", "NEM", "FCX", "NUE", "DD"],
+}
+
+
+def _snowflake_radar(ticker):
+    """Simply Wall St style 5-axis radar: Value, Growth, Health, Dividend, Momentum."""
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+    except Exception:
+        return
+
+    # Score each axis 0-5
+    # Value: P/E vs 25 (lower = better)
+    pe = info.get("trailingPE") or info.get("forwardPE")
+    value_score = max(0, min(5, 5 - (pe - 10) / 6)) if pe and pe > 0 else 2.5
+
+    # Growth: Revenue growth %
+    rev_growth = info.get("revenueGrowth", 0) or 0
+    growth_score = max(0, min(5, rev_growth * 100 / 10))  # 50% growth = 5
+
+    # Health: Current ratio + low debt
+    cr = info.get("currentRatio", 1.5) or 1.5
+    de = info.get("debtToEquity", 100) or 100
+    health_score = max(0, min(5, (cr / 0.6) + (3 - de / 100)))
+
+    # Dividend: yield %
+    div_yield = (info.get("dividendYield") or 0) * 100
+    dividend_score = max(0, min(5, div_yield / 1.0))  # 5% yield = 5
+
+    # Momentum: 52-week return
+    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+    low52 = info.get("fiftyTwoWeekLow") or price
+    high52 = info.get("fiftyTwoWeekHigh") or price
+    if high52 > low52 and price > 0:
+        momentum_score = max(0, min(5, ((price - low52) / (high52 - low52)) * 5))
+    else:
+        momentum_score = 2.5
+
+    categories = ["Value", "Growth", "Health", "Dividend", "Momentum"]
+    scores = [value_score, growth_score, health_score, dividend_score, momentum_score]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=scores + [scores[0]],
+        theta=categories + [categories[0]],
+        fill="toself",
+        fillcolor="rgba(96,165,250,0.15)",
+        line=dict(color="#60a5fa", width=2),
+        marker=dict(size=6, color="#60a5fa"),
+    ))
+    fig.update_layout(**dark_layout(
+        polar=dict(
+            bgcolor="#0a0a0a",
+            radialaxis=dict(visible=True, range=[0, 5], linecolor="#1a1a1a",
+                            gridcolor="#1a1a1a", tickfont=dict(color="#5a6f8a", size=10)),
+            angularaxis=dict(linecolor="#1a1a1a", gridcolor="#1a1a1a",
+                             tickfont=dict(color="#94a3b8", size=12)),
+        ),
+        height=350,
+        margin=dict(l=60, r=60, t=40, b=40),
+    ))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Score summary
+    avg_score = sum(scores) / len(scores)
+    label = "EXCELENTE" if avg_score >= 3.5 else ("BUENO" if avg_score >= 2.5 else "DÉBIL")
+    color = "#34d399" if avg_score >= 3.5 else ("#fbbf24" if avg_score >= 2.5 else "#f87171")
+    st.markdown(
+        f"<div style='text-align:center;color:{color};font-weight:700;font-size:16px;'>"
+        f"{label} — {avg_score:.1f}/5.0</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analyst Price Targets
+# ---------------------------------------------------------------------------
+def _analyst_price_targets(ticker):
+    """Show analyst consensus price target range as a visual bar."""
+    try:
+        tk = yf.Ticker(ticker)
+        targets = tk.analyst_price_targets
+        if targets is None or (hasattr(targets, "empty") and targets.empty):
+            st.info("No hay price targets de analistas disponibles.")
+            return
+        current = targets.get("current", 0) or 0
+        low = targets.get("low", 0) or 0
+        high = targets.get("high", 0) or 0
+        mean = targets.get("mean", 0) or 0
+        median = targets.get("median", 0) or 0
+    except Exception:
+        st.info("No se pudieron obtener price targets.")
+        return
+
+    if not high or not low:
+        return
+
+    price_now = current if current else mean
+    bar_min = low * 0.95
+    bar_max = high * 1.05
+    bar_range = bar_max - bar_min if bar_max > bar_min else 1
+
+    def pct(val):
+        return max(0, min(100, ((val - bar_min) / bar_range) * 100))
+
+    pct_low = pct(low)
+    pct_high = pct(high)
+    pct_mean = pct(mean)
+    pct_price = pct(price_now)
+
+    upside = ((mean - price_now) / price_now * 100) if price_now else 0
+    upside_color = "#34d399" if upside >= 0 else "#f87171"
+
+    st.markdown(f"""
+    <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:20px;'>
+      <div style='display:flex;justify-content:space-between;margin-bottom:8px;'>
+        <span style='color:#94a3b8;font-size:12px;'>LOW: ${low:,.2f}</span>
+        <span style='color:#94a3b8;font-size:12px;'>MEAN: ${mean:,.2f}</span>
+        <span style='color:#94a3b8;font-size:12px;'>HIGH: ${high:,.2f}</span>
+      </div>
+      <div style='position:relative;height:32px;background:#111;border-radius:6px;overflow:visible;'>
+        <!-- Range bar low-to-high -->
+        <div style='position:absolute;left:{pct_low}%;width:{pct_high - pct_low}%;height:100%;
+                    background:linear-gradient(90deg, #f87171, #fbbf24, #34d399);border-radius:6px;opacity:0.3;'></div>
+        <!-- Mean marker -->
+        <div style='position:absolute;left:{pct_mean}%;top:-4px;width:3px;height:40px;
+                    background:#a78bfa;border-radius:2px;'></div>
+        <!-- Current price marker -->
+        <div style='position:absolute;left:{pct_price}%;top:-6px;width:14px;height:14px;
+                    margin-left:-7px;top:9px;background:#60a5fa;border-radius:50%;
+                    border:2px solid #fff;z-index:2;'></div>
+      </div>
+      <div style='display:flex;justify-content:space-between;margin-top:10px;'>
+        <span style='color:#60a5fa;font-size:13px;font-weight:600;'>Precio actual: ${price_now:,.2f}</span>
+        <span style='color:{upside_color};font-size:13px;font-weight:600;'>
+          Upside al mean: {upside:+.1f}%</span>
+      </div>
+      {f"<div style='text-align:center;color:#94a3b8;font-size:11px;margin-top:6px;'>Median: ${median:,.2f}</div>" if median else ""}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Peer Comparison Table
+# ---------------------------------------------------------------------------
+def _peer_comparison(ticker):
+    """Compare ticker vs 5-8 sector peers on key metrics."""
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+    except Exception:
+        st.info("No se pudo obtener información del ticker.")
+        return
+
+    sector = info.get("sector", "")
+    peers_list = SECTOR_PEERS.get(sector, [])
+    # Remove self and limit to 7
+    peers_list = [p for p in peers_list if p.upper() != ticker.upper()][:7]
+
+    if not peers_list:
+        st.info(f"No hay peers definidos para el sector '{sector}'.")
+        return
+
+    tickers_to_fetch = [ticker.upper()] + peers_list
+
+    rows = []
+    for sym in tickers_to_fetch:
+        try:
+            t = yf.Ticker(sym)
+            i = t.info
+            rows.append({
+                "Ticker": sym,
+                "P/E": round(i.get("trailingPE") or 0, 1),
+                "Fwd P/E": round(i.get("forwardPE") or 0, 1),
+                "P/B": round(i.get("priceToBook") or 0, 2),
+                "EV/EBITDA": round(i.get("enterpriseToEbitda") or 0, 1),
+                "Margen Neto %": round((i.get("profitMargins") or 0) * 100, 1),
+                "ROE %": round((i.get("returnOnEquity") or 0) * 100, 1),
+                "Rev Growth %": round((i.get("revenueGrowth") or 0) * 100, 1),
+                "Div Yield %": round((i.get("dividendYield") or 0) * 100, 2),
+                "Mkt Cap (B)": round((i.get("marketCap") or 0) / 1e9, 1),
+            })
+        except Exception:
+            continue
+
+    if not rows:
+        st.info("No se pudieron obtener datos de peers.")
+        return
+
+    df = pd.DataFrame(rows)
+
+    # Style: highlight the main ticker row
+    def highlight_main(row):
+        if row["Ticker"] == ticker.upper():
+            return ["background-color: rgba(96,165,250,0.12); font-weight: 700;"] * len(row)
+        return [""] * len(row)
+
+    styled = (
+        df.style
+        .apply(highlight_main, axis=1)
+        .format(precision=1, na_rep="—")
+        .set_properties(**{
+            "color": "#c8d6e5",
+            "background-color": "#0a0a0a",
+            "border-color": "#1a1a1a",
+            "font-size": "12px",
+        })
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +498,7 @@ def _render_quality_score(ticker: str):
                 axis=dict(range=[0, 100], tickcolor="#475569",
                          tickfont=dict(color="#475569", size=10)),
                 bar=dict(color=sc_color, thickness=0.7),
-                bgcolor="#0f1923", bordercolor="#1e2d40",
+                bgcolor="#0a0a0a", bordercolor="#1a1a1a",
                 steps=[
                     dict(range=[0, 40], color="rgba(248,113,113,0.1)"),
                     dict(range=[40, 70], color="rgba(251,191,36,0.1)"),
@@ -154,7 +506,7 @@ def _render_quality_score(ticker: str):
                 ],
             )
         ))
-        fig_q.update_layout(**DARK, height=250, margin=dict(l=20, r=20, t=50, b=10))
+        fig_q.update_layout(**dark_layout(height=250, margin=dict(l=20, r=20, t=50, b=10)))
         st.plotly_chart(fig_q, use_container_width=True)
         st.markdown(f"""
         <div style='text-align:center;background:{sc_bg};border:2px solid {sc_color};
@@ -251,7 +603,8 @@ def render():
         uploaded = st.file_uploader("Subir informe financiero (PDF)", type=["pdf"],
                                      label_visibility="collapsed")
     with col_r:
-        manual_ticker = st.text_input("Ticker de la empresa", placeholder="MSFT, AAPL, INTU…")
+        manual_ticker = st.text_input("Ticker de la empresa", placeholder="MSFT, AAPL, INTU…",
+                                      value=st.session_state.get("active_ticker", ""))
 
     if uploaded:
         with st.spinner("Extrayendo datos del PDF…"):
@@ -502,11 +855,11 @@ def render():
                         fill="toself", name=ticker_name,
                         line=dict(color="#60a5fa", width=2), fillcolor="rgba(96,165,250,0.15)"))
                     fig_r.update_layout(**DARK, height=320,
-                        polar=dict(bgcolor="#0f1923",
-                            angularaxis=dict(linecolor="#1e2d40", gridcolor="#1e2d40", color="#64748b"),
-                            radialaxis=dict(linecolor="#1e2d40", gridcolor="#1e2d40",
+                        polar=dict(bgcolor="#0a0a0a",
+                            angularaxis=dict(linecolor="#1a1a1a", gridcolor="#1a1a1a", color="#64748b"),
+                            radialaxis=dict(linecolor="#1a1a1a", gridcolor="#1a1a1a",
                                           range=[0,150], showticklabels=False)),
-                        legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40"),
+                        legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"),
                         title=dict(text="Radar de Metricas", font=dict(color="#94a3b8", size=13), x=0.5))
                     st.plotly_chart(fig_r, use_container_width=True)
 
@@ -622,8 +975,8 @@ def render():
                                 axis=dict(range=[vmin, vmax], tickcolor="#475569",
                                          tickfont=dict(color="#475569", size=10)),
                                 bar=dict(color=gcolor, thickness=0.6),
-                                bgcolor="#0f1923",
-                                bordercolor="#1e2d40",
+                                bgcolor="#0a0a0a",
+                                bordercolor="#1a1a1a",
                                 steps=[dict(range=[vmin, vmax], color="#0d1829")],
                                 threshold=dict(
                                     line=dict(color="#fbbf24", width=2),
@@ -632,7 +985,7 @@ def render():
                                 ),
                             )
                         ))
-                        fig_g.update_layout(**DARK, height=200, margin=dict(l=24,r=24,t=40,b=10))
+                        fig_g.update_layout(**dark_layout(height=200, margin=dict(l=24,r=24,t=40,b=10)))
                         col.plotly_chart(fig_g, use_container_width=True)
 
                 # ── BUFFETT/DORSEY CHECKLIST ──
@@ -730,19 +1083,34 @@ def render():
     # ══════════════════════════════════════════════════════════════
     if not uploaded and manual_ticker and manual_ticker.strip():
         ticker_solo = manual_ticker.strip().upper()
+        # Sync to global state
+        st.session_state.active_ticker = ticker_solo
+
         st.markdown(f"""
-        <div style='background:linear-gradient(135deg,#0d1f35,#0a1628);border:1px solid #1e3a5f;
+        <div style='background:#000000;border:1px solid #1a1a1a;
                     border-radius:14px;padding:24px 28px;margin-bottom:20px;'>
           <div style='font-size:28px;font-weight:700;color:#f0f6ff;'>{ticker_solo}</div>
           <div style='font-size:13px;color:#64748b;margin-top:4px;'>Análisis rápido por ticker · Sin PDF</div>
         </div>""", unsafe_allow_html=True)
 
-        # ── TradingView Chart ──
-        st.markdown("<div class='sec-title'>Chart en Tiempo Real</div>", unsafe_allow_html=True)
+        # ── Master Chart (TradingView Advanced) ──
         try:
             _tradingview_chart(ticker_solo)
         except Exception:
             st.info("No se pudo cargar el chart de TradingView.")
+
+        # ── Analyst Insights (Symbol Info + TA Gauge) ──
+        try:
+            _tradingview_analyst_insights(ticker_solo)
+        except Exception:
+            pass
+
+        # ── Institutional News (Timeline) ──
+        with st.expander("📰 Noticias Institucionales", expanded=False):
+            try:
+                _tradingview_news(ticker_solo)
+            except Exception:
+                st.info("No se pudieron cargar noticias.")
 
         # ── Fair Value ──
         with st.spinner("Calculando Fair Value…"):
@@ -766,6 +1134,69 @@ def render():
               <div style='font-size:22px;font-weight:800;color:{sig_colors[sc_fv]};'>{sig_labels.get(fv_solo['signal'],'')}</div>
               <div style='font-size:13px;color:#64748b;'>FV Prom: ${fv_solo["avg_fair_value"]:,.2f} ({fv_solo["upside_pct"]:+.1f}%)</div>
             </div>""", unsafe_allow_html=True)
+
+        # ── Card Margen de Seguridad ──
+        if fv_solo and fv_solo.get("avg_fair_value") and fv_solo.get("current_price"):
+            _margin_of_safety_card(fv_solo["current_price"], fv_solo["avg_fair_value"], ticker_solo)
+
+        # ── Snowflake Radar ──
+        with st.expander("❄️ Snowflake — Análisis 5 Dimensiones", expanded=True):
+            try:
+                _snowflake_radar(ticker_solo)
+            except Exception as e:
+                st.warning(f"Error: {e}")
+
+        # ── Analyst Price Targets ──
+        with st.expander("🎯 Price Targets de Analistas"):
+            try:
+                _analyst_price_targets(ticker_solo)
+            except Exception as e:
+                st.warning(f"Error: {e}")
+
+        # ── Peer Comparison ──
+        with st.expander("📊 Comparación con Peers"):
+            try:
+                _peer_comparison(ticker_solo)
+            except Exception as e:
+                st.warning(f"Error: {e}")
+
+        # ── Financial Health Score (Altman Z + Piotroski F) ──
+        with st.expander("🏥 Salud Financiera (Altman Z + Piotroski F)"):
+            try:
+                hs = valuation.compute_health_scores(ticker_solo)
+                if hs.get("z_score") is not None or hs.get("f_score") is not None:
+                    hc1, hc2 = st.columns(2)
+                    with hc1:
+                        if hs.get("z_score") is not None:
+                            z_color = {"SAFE": "#34d399", "GREY": "#fbbf24", "DISTRESS": "#f87171"}.get(hs["z_label"], "#94a3b8")
+                            z_label_es = {"SAFE": "SEGURO", "GREY": "ZONA GRIS", "DISTRESS": "RIESGO"}.get(hs["z_label"], "N/A")
+                            st.markdown(f"""
+                            <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:14px;padding:20px;text-align:center;'>
+                              <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;'>Altman Z-Score</div>
+                              <div style='font-size:32px;font-weight:800;color:{z_color};margin:8px 0;'>{hs['z_score']}</div>
+                              <div style='font-size:14px;font-weight:600;color:{z_color};'>{z_label_es}</div>
+                              <div style='font-size:11px;color:#475569;margin-top:4px;'>{"Z > 2.99 = seguro" if hs["z_score"] > 2.99 else ("1.81 < Z < 2.99 = zona gris" if hs["z_score"] > 1.81 else "Z < 1.81 = riesgo quiebra")}</div>
+                            </div>""", unsafe_allow_html=True)
+                    with hc2:
+                        if hs.get("f_score") is not None:
+                            f_color = {"STRONG": "#34d399", "MODERATE": "#fbbf24", "WEAK": "#f87171"}.get(hs["f_label"], "#94a3b8")
+                            f_label_es = {"STRONG": "FUERTE", "MODERATE": "MODERADO", "WEAK": "DÉBIL"}.get(hs["f_label"], "N/A")
+                            st.markdown(f"""
+                            <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:14px;padding:20px;text-align:center;'>
+                              <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;'>Piotroski F-Score</div>
+                              <div style='font-size:32px;font-weight:800;color:{f_color};margin:8px 0;'>{hs['f_score']}/9</div>
+                              <div style='font-size:14px;font-weight:600;color:{f_color};'>{f_label_es}</div>
+                              <div style='font-size:11px;color:#475569;margin-top:4px;'>{"F ≥ 7 = fuerte" if hs["f_score"] >= 7 else ("4 ≤ F < 7 = moderado" if hs["f_score"] >= 4 else "F < 4 = débil")}</div>
+                            </div>""", unsafe_allow_html=True)
+                        # Show Piotroski details
+                        if hs.get("f_details"):
+                            for criterion, passed in hs["f_details"].items():
+                                icon = "✅" if passed else "❌"
+                                st.markdown(f"<span style='color:{('#34d399' if passed else '#f87171')};font-size:12px;'>{icon} {criterion}</span>", unsafe_allow_html=True)
+                else:
+                    st.info("No se pudieron calcular los scores de salud financiera.")
+            except Exception as e:
+                st.warning(f"Error: {e}")
 
         # ── Buffett/Dorsey Checklist ──
         st.markdown("<div class='sec-title'>Checklist Buffett/Dorsey</div>", unsafe_allow_html=True)
@@ -916,7 +1347,7 @@ def render():
                                 ))
                         fig_evo.update_layout(**DARK, height=300,
                             title=dict(text="Evolución de Ratios", font=dict(color="#94a3b8", size=13), x=0.5),
-                            legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40"))
+                            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
                         st.plotly_chart(fig_evo, use_container_width=True)
 
                     with ech2:
@@ -940,11 +1371,11 @@ def render():
                                 line=dict(color="#f87171", width=2, dash="dot"),
                                 marker=dict(size=6),
                             ))
-                        fig_price.update_layout(**DARK, height=300,
+                        fig_price.update_layout(**dark_layout(height=300,
                             title=dict(text="Precio vs P/E", font=dict(color="#94a3b8", size=13), x=0.5),
                             yaxis=dict(title="Precio ($)"),
                             yaxis2=dict(title="P/E", overlaying="y", side="right", showgrid=False),
-                            legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40"))
+                            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a")))
                         st.plotly_chart(fig_price, use_container_width=True)
             elif len(hist_df) == 1:
                 st.info(f"Solo hay 1 análisis para {sel_ticker}. Sube otro reporte para ver la evolución.")

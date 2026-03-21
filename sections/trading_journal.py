@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date
 import database as db
-from ui_shared import DARK, kpi
+from ui_shared import DARK, dark_layout, kpi
 import excel_export
 import ai_engine
 
@@ -89,10 +89,10 @@ def render():
             marker_color=eq["color"], name="P&L por trade", opacity=0.6,
             yaxis="y2"))
         fig_eq.add_hline(y=0, line_dash="dot", line_color="#334155")
-        fig_eq.update_layout(**DARK, height=300,
-            yaxis=dict(title="P&L Acumulado", gridcolor="#1e2d40"),
+        fig_eq.update_layout(**dark_layout(height=300,
+            yaxis=dict(title="P&L Acumulado", gridcolor="#1a1a1a"),
             yaxis2=dict(title="P&L Trade", overlaying="y", side="right", showgrid=False),
-            legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40", font=dict(size=11)))
+            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a", font=dict(size=11))))
         st.plotly_chart(fig_eq, use_container_width=True)
 
         st.markdown("<div class='sec-title'>Análisis de Desempeño</div>", unsafe_allow_html=True)

@@ -3,6 +3,7 @@ Quantum Retail Terminal — Pro Edition
 Dashboard privado de inversiones · Streamlit + SQLite + yfinance
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import database as db
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
@@ -27,8 +28,23 @@ st.markdown("""
    BASE & GLOBAL
    ══════════════════════════════════════════════════════════════ */
 .stApp {
-    background: radial-gradient(ellipse at 20% 50%, #0c1929 0%, #070b14 50%, #050810 100%);
+    background: #000000;
     color: #e2e8f0;
+}
+/* Remove top padding so widgets sit flush */
+.main .block-container {
+    padding-top: 0.5rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+}
+/* Clean iframes for TradingView widgets */
+iframe {
+    border: none !important;
+    overflow: hidden !important;
+}
+[data-testid="stIFrame"] {
+    border: none !important;
+    border-radius: 0 !important;
 }
 
 /* Hide Streamlit header bar & footer */
@@ -40,8 +56,8 @@ header[data-testid="stHeader"] { background: transparent !important; }
    SIDEBAR
    ══════════════════════════════════════════════════════════════ */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(195deg, #0d1520 0%, #080d16 100%) !important;
-    border-right: 1px solid rgba(30,58,95,0.5) !important;
+    background: #000000 !important;
+    border-right: 1px solid #111111 !important;
 }
 section[data-testid="stSidebar"] > div:first-child {
     background: transparent !important;
@@ -118,10 +134,8 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
    TOP HEADER BANNER
    ══════════════════════════════════════════════════════════════ */
 .top-header {
-    background: linear-gradient(135deg, rgba(13,31,53,0.8) 0%, rgba(10,22,40,0.9) 50%, rgba(7,16,32,0.8) 100%);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(59,130,246,0.15);
+    background: #000000;
+    border: 1px solid #111111;
     border-radius: 20px;
     padding: 28px 36px;
     margin-bottom: 32px;
@@ -156,9 +170,8 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
    KPI CARDS
    ══════════════════════════════════════════════════════════════ */
 .kpi-card {
-    background: linear-gradient(145deg, rgba(15,25,35,0.9), rgba(17,29,46,0.9));
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(30,58,95,0.4);
+    background: linear-gradient(145deg, #0a0a0a, #111111);
+    border: 1px solid #1a1a1a;
     border-radius: 16px;
     padding: 22px 24px;
     position: relative;
@@ -168,7 +181,7 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
 .kpi-card:hover {
     border-color: rgba(59,130,246,0.3);
     transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
 .kpi-card::before {
     content: '';
@@ -203,8 +216,8 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
    SCORE BADGE
    ══════════════════════════════════════════════════════════════ */
 .score-ring {
-    background: linear-gradient(145deg, #0f1923, #111d2e);
-    border: 1px solid rgba(30,58,95,0.4);
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
     border-radius: 16px;
     padding: 20px;
     text-align: center;
@@ -214,9 +227,8 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
    METRIC CARDS
    ══════════════════════════════════════════════════════════════ */
 .metric-card {
-    background: rgba(15,25,35,0.7);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(30,45,64,0.5);
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 10px;
@@ -235,18 +247,18 @@ button[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::befo
    ══════════════════════════════════════════════════════════════ */
 [data-testid="stDataFrame"] {
     border-radius: 14px; overflow: hidden;
-    border: 1px solid rgba(30,45,64,0.4) !important;
+    border: 1px solid #1a1a1a !important;
 }
 thead tr th {
-    background: #0a1420 !important; color: #5a6f8a !important; font-size: 10px !important;
+    background: #0a0a0a !important; color: #5a6f8a !important; font-size: 10px !important;
     text-transform: uppercase !important; letter-spacing: 1px !important;
     font-weight: 700 !important; padding: 12px 16px !important;
 }
 tbody tr td {
-    background: #0d1620 !important; color: #e2e8f0 !important; font-size: 13px !important;
-    border-color: rgba(30,45,64,0.3) !important; padding: 10px 16px !important;
+    background: #050505 !important; color: #e2e8f0 !important; font-size: 13px !important;
+    border-color: #1a1a1a !important; padding: 10px 16px !important;
 }
-tbody tr:hover td { background: #111e2e !important; }
+tbody tr:hover td { background: #111111 !important; }
 
 /* ══════════════════════════════════════════════════════════════
    ALL INPUTS (text, number, textarea, select, date)
@@ -264,8 +276,8 @@ tbody tr:hover td { background: #111e2e !important; }
 }
 .stTextInput input, .stNumberInput input, .stTextArea textarea,
 .stDateInput input {
-    background: rgba(15,25,35,0.8) !important;
-    border: 1px solid rgba(30,58,95,0.5) !important;
+    background: #0a0a0a !important;
+    border: 1px solid #1a1a1a !important;
     border-radius: 10px !important;
     color: #e2e8f0 !important;
     font-size: 13px !important;
@@ -280,20 +292,20 @@ tbody tr:hover td { background: #111e2e !important; }
 .stSelectbox > div > div,
 [data-baseweb="select"],
 [data-baseweb="select"] > div {
-    background: rgba(15,25,35,0.8) !important;
-    border-color: rgba(30,58,95,0.5) !important;
+    background: #0a0a0a !important;
+    border-color: #1a1a1a !important;
     border-radius: 10px !important;
     color: #e2e8f0 !important;
 }
 .stSelectbox > div > div,
 [data-baseweb="select"] > div {
-    border: 1px solid rgba(30,58,95,0.5) !important;
+    border: 1px solid #1a1a1a !important;
 }
 /* Selectbox dropdown menu */
 [data-baseweb="popover"] > div,
 [data-baseweb="menu"] {
-    background: #0d1620 !important;
-    border: 1px solid rgba(30,58,95,0.5) !important;
+    background: #0a0a0a !important;
+    border: 1px solid #1a1a1a !important;
     border-radius: 10px !important;
 }
 [data-baseweb="menu"] li {
@@ -306,8 +318,8 @@ tbody tr:hover td { background: #111e2e !important; }
 /* Number input stepper buttons */
 .stNumberInput button,
 [data-testid="stNumberInput"] button {
-    background: rgba(30,58,95,0.3) !important;
-    border: 1px solid rgba(30,58,95,0.5) !important;
+    background: #111111 !important;
+    border: 1px solid #1a1a1a !important;
     color: #94a3b8 !important;
     border-radius: 6px !important;
 }
@@ -323,8 +335,8 @@ tbody tr:hover td { background: #111e2e !important; }
 }
 /* Date input */
 [data-testid="stDateInput"] > div > div {
-    background: rgba(15,25,35,0.8) !important;
-    border: 1px solid rgba(30,58,95,0.5) !important;
+    background: #0a0a0a !important;
+    border: 1px solid #1a1a1a !important;
     border-radius: 10px !important;
 }
 /* Slider */
@@ -351,7 +363,7 @@ tbody tr:hover td { background: #111e2e !important; }
 }
 [data-testid="stFileUploaderDropzone"],
 [data-testid="stFileUploader"] section {
-    background: rgba(15,25,35,0.6) !important;
+    background: #0a0a0a !important;
     border: 2px dashed rgba(59,130,246,0.25) !important;
     border-radius: 14px !important;
     padding: 32px 20px !important;
@@ -412,14 +424,14 @@ tbody tr:hover td { background: #111e2e !important; }
    EXPANDERS
    ══════════════════════════════════════════════════════════════ */
 [data-testid="stExpander"] {
-    border: 1px solid rgba(30,45,64,0.4) !important;
+    border: 1px solid #1a1a1a !important;
     border-radius: 14px !important;
     overflow: hidden;
     background: transparent !important;
 }
 [data-testid="stExpander"] summary,
 .streamlit-expanderHeader {
-    background: rgba(13,22,32,0.8) !important;
+    background: #0a0a0a !important;
     border: none !important;
     border-radius: 0 !important;
     color: #94a3b8 !important;
@@ -428,13 +440,13 @@ tbody tr:hover td { background: #111e2e !important; }
 }
 [data-testid="stExpander"] summary:hover,
 .streamlit-expanderHeader:hover {
-    background: rgba(17,30,46,0.9) !important;
+    background: #111111 !important;
 }
 [data-testid="stExpander"] > div:last-child,
 .streamlit-expanderContent {
-    background: rgba(11,21,32,0.6) !important;
+    background: #050505 !important;
     border: none !important;
-    border-top: 1px solid rgba(30,45,64,0.3) !important;
+    border-top: 1px solid #1a1a1a !important;
     padding: 16px 20px !important;
 }
 /* Fix expander arrow icon */
@@ -446,11 +458,11 @@ tbody tr:hover td { background: #111e2e !important; }
    TABS
    ══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {
-    background: rgba(13,20,30,0.5) !important;
+    background: #0a0a0a !important;
     border-radius: 12px !important;
     padding: 4px !important;
     gap: 4px !important;
-    border: 1px solid rgba(30,45,64,0.3) !important;
+    border: 1px solid #1a1a1a !important;
 }
 .stTabs [data-baseweb="tab"] {
     color: #5a6f8a !important;
@@ -521,11 +533,11 @@ div[data-baseweb="notification"][kind="warning"] {
 /* ══════════════════════════════════════════════════════════════
    DIVIDERS & SCROLLBAR
    ══════════════════════════════════════════════════════════════ */
-hr { border-color: rgba(30,45,64,0.4) !important; margin: 28px 0 !important; }
+hr { border-color: #1a1a1a !important; margin: 28px 0 !important; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(30,58,95,0.5); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(59,130,246,0.4); }
 
 /* ══════════════════════════════════════════════════════════════
@@ -534,7 +546,7 @@ hr { border-color: rgba(30,45,64,0.4) !important; margin: 28px 0 !important; }
 [data-testid="stPlotlyChart"] {
     border-radius: 14px;
     overflow: hidden;
-    border: 1px solid rgba(30,45,64,0.3);
+    border: 1px solid #1a1a1a;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -570,6 +582,38 @@ hr { border-color: rgba(30,45,64,0.4) !important; margin: 28px 0 !important; }
 # ── INIT ───────────────────────────────────────────────────────────────────────
 db.init_db()
 
+# ── GLOBAL STATE ──────────────────────────────────────────────────────────────
+for _key, _default in [("active_ticker", ""), ("last_section", ""), ("nav_history", [])]:
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
+
+# ── TICKER TAPE (Top Ribbon — precios en vivo) ───────────────────────────────
+components.html("""
+<div class="tradingview-widget-container">
+  <div class="tradingview-widget-container__widget"></div>
+  <script type="text/javascript"
+    src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+    {
+      "symbols": [
+        {"proName":"FOREXCOM:SPXUSD","title":"S&P 500"},
+        {"proName":"FOREXCOM:NSXUSD","title":"US 100"},
+        {"proName":"FX_IDC:EURUSD","title":"EUR/USD"},
+        {"proName":"BITSTAMP:BTCUSD","title":"Bitcoin"},
+        {"proName":"BITSTAMP:ETHUSD","title":"Ethereum"},
+        {"proName":"FOREXCOM:DJI","title":"Dow Jones"},
+        {"proName":"TVC:GOLD","title":"Gold"},
+        {"proName":"TVC:US10Y","title":"US 10Y"}
+      ],
+      "showSymbolLogo": true,
+      "isTransparent": true,
+      "displayMode": "adaptive",
+      "colorTheme": "dark",
+      "locale": "es"
+    }
+  </script>
+</div>
+""", height=46)
+
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -578,10 +622,17 @@ with st.sidebar:
            -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px;
            letter-spacing:-0.5px;'>💎 Quantum Retail</div>
       <div style='font-size:14px;font-weight:700;color:#e2e8f0 !important;letter-spacing:0.5px;'>Terminal</div>
-      <div style='font-size:10px;color:#3e5068 !important;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v4.0</div>
+      <div style='font-size:10px;color:#3e5068 !important;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v5.0</div>
     </div>
-    <hr style='margin:0 16px 16px 16px;border-color:rgba(30,58,95,0.3);'>
+    <hr style='margin:0 16px 16px 16px;border-color:#111111;'>
     """, unsafe_allow_html=True)
+
+    # Quick ticker search (sincroniza todos los widgets TradingView)
+    _ticker_in = st.text_input("🔍", placeholder="Buscar ticker (ej: AAPL)",
+                                value=st.session_state.get("active_ticker", ""),
+                                label_visibility="collapsed")
+    if _ticker_in.strip() and _ticker_in.strip().upper() != st.session_state.get("active_ticker", ""):
+        st.session_state.active_ticker = _ticker_in.strip().upper()
 
     section = st.radio(
         "", ["🏠  Dashboard",
@@ -591,7 +642,8 @@ with st.sidebar:
              "👁️  Watchlist & Cartera",
              "📓  Diario de Trading",
              "💱  Forex & Índices",
-             "📊  Contexto Macro"],
+             "📊  Contexto Macro",
+             "⚙️  Sistema"],
         label_visibility="collapsed"
     )
     st.markdown("""
@@ -626,4 +678,7 @@ elif "💱" in section:
     render()
 elif "📊" in section:
     from sections.macro_context import render
+    render()
+elif "⚙️" in section:
+    from sections.system_health import render
     render()

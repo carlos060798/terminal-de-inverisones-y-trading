@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from ui_shared import DARK, kpi
+from ui_shared import DARK, dark_layout, kpi
 import ai_engine
 
 # Try FRED
@@ -224,10 +224,10 @@ def render():
                                 mode="lines", line=dict(color=color, width=1.5),
                                 fill="tozeroy", fillcolor=f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.06)",
                             ))
-                            fig.update_layout(**DARK, height=250,
+                            fig.update_layout(**dark_layout(height=250,
                                 title=dict(text=f"{name} — 3 años",
                                           font=dict(color="#94a3b8", size=12), x=0.5),
-                                showlegend=False, margin=dict(l=40, r=20, t=40, b=30))
+                                showlegend=False, margin=dict(l=40, r=20, t=40, b=30)))
                             st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
                         st.warning(f"Error cargando {name}: {e}")
@@ -306,8 +306,8 @@ def render():
                     axis=dict(range=[0, 50], tickcolor="#475569",
                              tickfont=dict(color="#475569", size=10)),
                     bar=dict(color="#60a5fa", thickness=0.6),
-                    bgcolor="#0f1923",
-                    bordercolor="#1e2d40",
+                    bgcolor="#0a0a0a",
+                    bordercolor="#1a1a1a",
                     steps=[
                         dict(range=[0, 15], color="rgba(52,211,153,0.15)"),
                         dict(range=[15, 20], color="rgba(96,165,250,0.15)"),
@@ -318,7 +318,7 @@ def render():
                                   thickness=0.75, value=20),
                 )
             ))
-            fig_gauge.update_layout(**DARK, height=280, margin=dict(l=30, r=30, t=50, b=10))
+            fig_gauge.update_layout(**dark_layout(height=280, margin=dict(l=30, r=30, t=50, b=10)))
             st.plotly_chart(fig_gauge, use_container_width=True)
 
             # VIX + S&P500 chart

@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import database as db
-from ui_shared import DARK, fmt, kpi
+from ui_shared import DARK, dark_layout, fmt, kpi
 import excel_export
 import ai_engine
 
@@ -145,7 +145,7 @@ def render():
                 fig_eq.add_hline(y=0, line_dash="dot", line_color="#334155")
                 fig_eq.update_layout(**DARK, height=300,
                     title=dict(text="Equity Curve Global", font=dict(color="#94a3b8", size=13), x=0.5),
-                    legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40"))
+                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
                 st.plotly_chart(fig_eq, use_container_width=True)
 
         with gc2:
@@ -173,6 +173,70 @@ def render():
                         x=0.5, y=0.5, showarrow=False,
                         font=dict(size=18, color="#f0f6ff", family="Inter"))])
                 st.plotly_chart(fig_pie, use_container_width=True)
+
+    # ── RISK DASHBOARD ──
+    try:
+        risk_trades = db.get_trades()
+        if not risk_trades.empty and "pnl" in risk_trades.columns:
+            returns = risk_trades["pnl"].dropna()
+            if len(returns) >= 2:
+                mean_ret = returns.mean()
+                std_ret = returns.std()
+                downside = returns[returns < 0].std()
+
+                sharpe = mean_ret / std_ret if std_ret > 0 else 0
+                sortino = mean_ret / downside if downside > 0 else 0
+                var_95 = returns.quantile(0.05)
+
+                # Max Drawdown
+                cumulative = returns.cumsum()
+                running_max = cumulative.cummax()
+                drawdown = cumulative - running_max
+                max_dd = drawdown.min()
+
+                st.markdown("<div class='sec-title'>Risk Dashboard</div>", unsafe_allow_html=True)
+
+                rk1, rk2, rk3, rk4 = st.columns(4)
+                rk1.markdown(kpi("Sharpe Ratio", f"{sharpe:.2f}", "retorno / riesgo",
+                                 "green" if sharpe > 0 else "red"), unsafe_allow_html=True)
+                rk2.markdown(kpi("Sortino Ratio", f"{sortino:.2f}", "retorno / downside",
+                                 "green" if sortino > 0 else "red"), unsafe_allow_html=True)
+                rk3.markdown(kpi("VaR 95%", f"${var_95:,.2f}", "pérdida máx. probable",
+                                 "red"), unsafe_allow_html=True)
+                rk4.markdown(kpi("Max Drawdown", f"${max_dd:,.2f}", "caída máxima",
+                                 "red"), unsafe_allow_html=True)
+
+                # Drawdown chart
+                if "trade_date" in risk_trades.columns:
+                    closed_trades = risk_trades[risk_trades["pnl"].notna()].copy()
+                    closed_trades = closed_trades.sort_values("trade_date")
+                    if not closed_trades.empty:
+                        dd_cum = closed_trades["pnl"].cumsum()
+                        dd_max = dd_cum.cummax()
+                        dd_series = dd_cum - dd_max
+
+                        fig_dd = go.Figure()
+                        fig_dd.add_trace(go.Scatter(
+                            x=closed_trades["trade_date"], y=dd_series.values,
+                            mode="lines", name="Drawdown",
+                            line=dict(color="#f87171", width=1.5),
+                            fill="tozeroy", fillcolor="rgba(248,113,113,0.15)"))
+                        fig_dd.add_hline(y=0, line_dash="dot", line_color="#334155")
+                        fig_dd.update_layout(**dark_layout(
+                            height=300,
+                            title=dict(text="Drawdown", font=dict(color="#94a3b8", size=13), x=0.5),
+                            yaxis=dict(gridcolor="#1a1a1a", linecolor="#1a1a1a",
+                                       zerolinecolor="#1a1a1a", tickprefix="$"),
+                            xaxis=dict(gridcolor="#1a1a1a", linecolor="#1a1a1a",
+                                       zerolinecolor="#1a1a1a"),
+                        ))
+                        st.plotly_chart(fig_dd, use_container_width=True)
+            else:
+                st.info("Se necesitan al menos 2 trades cerrados para calcular métricas de riesgo.")
+        else:
+            st.info("Sin trades registrados para métricas de riesgo.")
+    except Exception as e:
+        st.info(f"No se pudieron calcular métricas de riesgo: {e}")
 
     # ── INVESTMENT THESES SUMMARY ──
     theses = db.get_all_investment_notes()

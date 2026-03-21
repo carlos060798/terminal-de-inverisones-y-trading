@@ -99,8 +99,8 @@ def render():
             fig_porter.update_layout(
                 polar=dict(
                     radialaxis=dict(visible=True, range=[0, 5], tickvals=[1,2,3,4,5],
-                                    gridcolor="#1e2d40", tickfont=dict(color="#64748b", size=10)),
-                    angularaxis=dict(gridcolor="#1e2d40", tickfont=dict(color="#94a3b8", size=11)),
+                                    gridcolor="#1a1a1a", tickfont=dict(color="#64748b", size=10)),
+                    angularaxis=dict(gridcolor="#1a1a1a", tickfont=dict(color="#94a3b8", size=11)),
                     bgcolor="rgba(0,0,0,0)",
                 ),
                 showlegend=False,

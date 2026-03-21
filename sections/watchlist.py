@@ -42,8 +42,9 @@ def render():
     </div>""", unsafe_allow_html=True)
 
     # ── TABS ──
-    tab_port, tab_chart, tab_bench, tab_div, tab_calc = st.tabs([
-        "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora"
+    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim = st.tabs([
+        "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora",
+        "🔗 Correlación", "📅 Earnings", "🎲 Simulación"
     ])
 
     # ══════════════════════════════════════════════════════════════
@@ -249,12 +250,12 @@ def render():
 
                 fig.update_layout(**DARK, height=650,
                     xaxis_rangeslider_visible=False,
-                    legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40", font=dict(size=10)),
+                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a", font=dict(size=10)),
                     title=dict(text=f"{sel} — Análisis Técnico ({per})", font=dict(color="#94a3b8", size=14)))
                 for annotation in fig['layout']['annotations']:
                     annotation['font'] = dict(color="#64748b", size=11)
-                fig.update_yaxes(gridcolor="#1e2d40")
-                fig.update_xaxes(gridcolor="#1e2d40")
+                fig.update_yaxes(gridcolor="#1a1a1a")
+                fig.update_xaxes(gridcolor="#1a1a1a")
                 st.plotly_chart(fig, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════
@@ -294,7 +295,7 @@ def render():
                 fig_bench.update_layout(**DARK, height=450,
                     title=dict(text=f"Rendimiento vs S&P 500 ({bench_period})", font=dict(color="#94a3b8", size=14), x=0.5),
                     yaxis_title="Retorno (%)",
-                    legend=dict(bgcolor="#0f1923", bordercolor="#1e2d40"))
+                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
                 st.plotly_chart(fig_bench, use_container_width=True)
 
                 # Summary table
@@ -484,3 +485,182 @@ def render():
                 st.markdown("</div></div>", unsafe_allow_html=True)
             else:
                 st.info("Ingresa precio de entrada y stop loss para calcular.")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 6: CORRELACIÓN
+    # ══════════════════════════════════════════════════════════════
+    with tab_corr:
+        try:
+            wl_corr = db.get_watchlist()
+            if wl_corr.empty:
+                st.info("Agrega tickers a tu watchlist primero.")
+            else:
+                tickers_corr = wl_corr["ticker"].tolist()
+                if len(tickers_corr) < 2:
+                    st.warning("Se necesitan al menos 2 tickers para calcular la matriz de correlación.")
+                else:
+                    with st.spinner("Descargando datos para correlación…"):
+                        prices_corr = yf.download(tickers_corr, period="1y", progress=False)["Close"]
+                        if isinstance(prices_corr, pd.Series):
+                            prices_corr = prices_corr.to_frame(tickers_corr[0])
+                        corr = prices_corr.pct_change().dropna().corr()
+
+                    if corr.empty:
+                        st.warning("No se pudieron obtener datos suficientes para la correlación.")
+                    else:
+                        st.markdown("<div class='sec-title'>Matriz de Correlación (1 año)</div>", unsafe_allow_html=True)
+                        fig_corr = px.imshow(
+                            corr,
+                            text_auto=".2f",
+                            color_continuous_scale=["#f87171", "#000000", "#34d399"],
+                            aspect="auto",
+                        )
+                        fig_corr.update_layout(**DARK, height=400,
+                            title=dict(text="Correlación de Retornos Diarios", font=dict(color="#94a3b8", size=13), x=0.5))
+                        st.plotly_chart(fig_corr, use_container_width=True)
+
+                        st.markdown("""
+                        <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                                    border-radius:12px;padding:14px;color:#94a3b8;font-size:12px;'>
+                          <strong>Interpretación:</strong> Valores cercanos a <span style='color:#34d399'>+1.0</span> indican alta correlación positiva.
+                          Valores cercanos a <span style='color:#f87171'>-1.0</span> indican correlación inversa (bueno para diversificación).
+                          Valores cercanos a <span style='color:#64748b'>0.0</span> indican poca relación.
+                        </div>""", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Error al calcular correlación: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 7: EARNINGS CALENDAR
+    # ══════════════════════════════════════════════════════════════
+    with tab_earn:
+        try:
+            wl_earn = db.get_watchlist()
+            if wl_earn.empty:
+                st.info("Agrega tickers a tu watchlist primero.")
+            else:
+                tickers_earn = wl_earn["ticker"].tolist()
+                st.markdown("<div class='sec-title'>Calendario de Earnings</div>", unsafe_allow_html=True)
+
+                with st.spinner("Consultando fechas de earnings…"):
+                    earnings_data = []
+                    for t in tickers_earn:
+                        try:
+                            cal = yf.Ticker(t).calendar
+                            if cal is not None:
+                                if isinstance(cal, dict):
+                                    ed_list = cal.get("Earnings Date", [])
+                                    ed = ed_list[0] if ed_list else None
+                                elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                                    ed = cal.iloc[0, 0] if len(cal) > 0 else None
+                                else:
+                                    ed = None
+                                if ed:
+                                    earnings_data.append({"Ticker": t, "Fecha Earnings": str(ed)})
+                        except Exception:
+                            pass
+
+                if earnings_data:
+                    earn_df = pd.DataFrame(earnings_data)
+                    earn_df = earn_df.sort_values("Fecha Earnings")
+
+                    # KPIs
+                    ek1, ek2 = st.columns(2)
+                    ek1.markdown(kpi("Tickers con Earnings", str(len(earn_df)), f"de {len(tickers_earn)} en watchlist", "blue"), unsafe_allow_html=True)
+                    next_earn = earn_df.iloc[0]
+                    ek2.markdown(kpi("Próximo Earnings", next_earn["Ticker"], next_earn["Fecha Earnings"], "purple"), unsafe_allow_html=True)
+
+                    st.dataframe(earn_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No se encontraron fechas de earnings próximas para los tickers en tu watchlist.")
+        except Exception as e:
+            st.error(f"Error al consultar earnings: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 8: MONTE CARLO SIMULATION
+    # ══════════════════════════════════════════════════════════════
+    with tab_sim:
+        try:
+            wl_sim = db.get_watchlist()
+            if wl_sim.empty:
+                st.info("Agrega tickers a tu watchlist primero.")
+            else:
+                tickers_sim = wl_sim["ticker"].tolist()
+                if len(tickers_sim) < 1:
+                    st.warning("Se necesita al menos 1 ticker para la simulación.")
+                else:
+                    st.markdown("<div class='sec-title'>Monte Carlo — Simulación de Portafolio</div>", unsafe_allow_html=True)
+                    st.markdown("""
+                    <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                                border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+                      Proyección a 1 año con 1000 simulaciones usando retornos diarios históricos (pesos iguales).
+                      Basado en distribución normal de retornos de los últimos 2 años.
+                    </div>""", unsafe_allow_html=True)
+
+                    if st.button("Ejecutar Simulación Monte Carlo", type="primary", key="mc_btn"):
+                        with st.spinner("Descargando datos y ejecutando 1000 simulaciones…"):
+                            prices_sim = yf.download(tickers_sim, period="2y", progress=False)["Close"]
+                            if isinstance(prices_sim, pd.Series):
+                                prices_sim = prices_sim.to_frame(tickers_sim[0])
+                            returns_sim = prices_sim.pct_change().dropna()
+
+                            # Equal weight portfolio
+                            port_returns = returns_sim.mean(axis=1)
+                            mu = port_returns.mean()
+                            sigma = port_returns.std()
+
+                            simulations = 1000
+                            days = 252
+                            sim_results = np.zeros((days, simulations))
+                            for i in range(simulations):
+                                daily_rets = np.random.normal(mu, sigma, days)
+                                sim_results[:, i] = (1 + daily_rets).cumprod()
+
+                        # Plot percentile bands
+                        fig_mc = go.Figure()
+                        percentiles = [
+                            (5,  "#f87171", "P5 (Peor caso)"),
+                            (25, "#fbbf24", "P25"),
+                            (50, "#60a5fa", "Mediana"),
+                            (75, "#fbbf24", "P75"),
+                            (95, "#34d399", "P95 (Mejor caso)"),
+                        ]
+                        for pct, color, name in percentiles:
+                            vals = np.percentile(sim_results, pct, axis=1)
+                            fig_mc.add_trace(go.Scatter(
+                                x=list(range(days)), y=vals,
+                                name=name, line=dict(color=color, width=2 if pct == 50 else 1),
+                            ))
+
+                        # Add shaded area between P25 and P75
+                        p25_vals = np.percentile(sim_results, 25, axis=1)
+                        p75_vals = np.percentile(sim_results, 75, axis=1)
+                        fig_mc.add_trace(go.Scatter(
+                            x=list(range(days)) + list(range(days))[::-1],
+                            y=list(p75_vals) + list(p25_vals)[::-1],
+                            fill="toself", fillcolor="rgba(96,165,250,0.08)",
+                            line=dict(color="rgba(0,0,0,0)"), showlegend=False,
+                        ))
+
+                        fig_mc.add_hline(y=1.0, line_dash="dot", line_color="#475569", line_width=0.8,
+                                         annotation_text="Inicio", annotation_font_color="#64748b")
+                        fig_mc.update_layout(**DARK, height=450,
+                            title=dict(text="Monte Carlo — 1000 simulaciones (1 año)", font=dict(color="#94a3b8", size=14), x=0.5),
+                            xaxis_title="Días de trading",
+                            yaxis_title="Valor relativo ($1 invertido)",
+                            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"))
+                        st.plotly_chart(fig_mc, use_container_width=True)
+
+                        # Summary stats
+                        final_vals = sim_results[-1, :]
+                        sk1, sk2, sk3, sk4 = st.columns(4)
+                        median_ret = (np.median(final_vals) - 1) * 100
+                        p5_ret = (np.percentile(final_vals, 5) - 1) * 100
+                        p95_ret = (np.percentile(final_vals, 95) - 1) * 100
+                        prob_profit = (final_vals > 1).sum() / simulations * 100
+
+                        sk1.markdown(kpi("Retorno Mediano", f"{median_ret:+.1f}%", "1 año", "blue"), unsafe_allow_html=True)
+                        sk2.markdown(kpi("Peor Escenario (P5)", f"{p5_ret:+.1f}%", "", "red"), unsafe_allow_html=True)
+                        sk3.markdown(kpi("Mejor Escenario (P95)", f"{p95_ret:+.1f}%", "", "green"), unsafe_allow_html=True)
+                        sk4.markdown(kpi("Prob. Ganancia", f"{prob_profit:.0f}%", f"de {simulations} sims", "purple"), unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Error en simulación Monte Carlo: {e}")

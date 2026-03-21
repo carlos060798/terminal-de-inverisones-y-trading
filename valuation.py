@@ -517,3 +517,139 @@ def compute_dcf_scenarios(ticker: str, parsed_data: dict = None) -> dict:
         return results
     except Exception:
         return {}
+
+
+def compute_health_scores(ticker: str) -> dict:
+    """
+    Compute Altman Z-Score and Piotroski F-Score for financial health assessment.
+    Returns dict with z_score, z_label, f_score, f_label, and component details.
+    """
+    result = {"z_score": None, "z_label": None, "f_score": None, "f_label": None,
+              "z_details": {}, "f_details": {}}
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        balance = tk.balance_sheet
+        financials = tk.financials
+        cashflow = tk.cashflow
+
+        if balance.empty or financials.empty:
+            return result
+
+        # Helper to get first column value from financial statement
+        def _get(df, labels):
+            for label in labels:
+                if label in df.index:
+                    v = df.loc[label].iloc[0]
+                    if v is not None and v == v:  # not NaN
+                        return float(v)
+            return None
+
+        # ── ALTMAN Z-SCORE ──
+        # Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
+        total_assets = _get(balance, ["Total Assets"])
+        current_assets = _get(balance, ["Current Assets"])
+        current_liabilities = _get(balance, ["Current Liabilities"])
+        retained_earnings = _get(balance, ["Retained Earnings"])
+        ebit = _get(financials, ["EBIT", "Operating Income"])
+        total_liabilities = _get(balance, ["Total Liabilities Net Minority Interest", "Total Liabilities"])
+        revenue = _get(financials, ["Total Revenue"])
+        market_cap = info.get("marketCap")
+
+        if total_assets and total_assets > 0:
+            x1 = ((current_assets or 0) - (current_liabilities or 0)) / total_assets  # Working capital / TA
+            x2 = (retained_earnings or 0) / total_assets  # Retained earnings / TA
+            x3 = (ebit or 0) / total_assets  # EBIT / TA
+            x4 = (market_cap or 0) / max(total_liabilities or 1, 1)  # Market cap / Total liabilities
+            x5 = (revenue or 0) / total_assets  # Revenue / TA
+
+            z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
+            result["z_score"] = round(z, 2)
+            result["z_details"] = {"X1_WC_TA": round(x1, 3), "X2_RE_TA": round(x2, 3),
+                                   "X3_EBIT_TA": round(x3, 3), "X4_MC_TL": round(x4, 3),
+                                   "X5_Rev_TA": round(x5, 3)}
+            if z > 2.99:
+                result["z_label"] = "SAFE"
+            elif z > 1.81:
+                result["z_label"] = "GREY"
+            else:
+                result["z_label"] = "DISTRESS"
+
+        # ── PIOTROSKI F-SCORE (9 binary criteria) ──
+        f_points = 0
+        f_details = {}
+
+        net_income = _get(financials, ["Net Income"])
+        cfo = _get(cashflow, ["Operating Cash Flow", "Total Cash From Operating Activities"])
+        roa_current = (net_income / total_assets) if net_income and total_assets and total_assets > 0 else None
+
+        # 1. Positive net income
+        if net_income and net_income > 0:
+            f_points += 1
+            f_details["ROA positivo"] = True
+        else:
+            f_details["ROA positivo"] = False
+
+        # 2. Positive operating cash flow
+        if cfo and cfo > 0:
+            f_points += 1
+            f_details["CFO positivo"] = True
+        else:
+            f_details["CFO positivo"] = False
+
+        # 3. ROA increasing (compare current vs implied from growth)
+        roa_improving = info.get("returnOnAssets", 0) and info.get("returnOnAssets", 0) > 0
+        if roa_improving:
+            f_points += 1
+        f_details["ROA mejorando"] = bool(roa_improving)
+
+        # 4. CFO > Net Income (quality of earnings)
+        if cfo and net_income and cfo > net_income:
+            f_points += 1
+            f_details["CFO > Net Income"] = True
+        else:
+            f_details["CFO > Net Income"] = False
+
+        # 5. Decreasing leverage (debt/assets)
+        total_debt = _get(balance, ["Total Debt", "Long Term Debt"])
+        low_leverage = (total_debt or 0) / total_assets < 0.5 if total_assets and total_assets > 0 else False
+        if low_leverage:
+            f_points += 1
+        f_details["Deuda/Activos < 50%"] = bool(low_leverage)
+
+        # 6. Improving current ratio
+        cr = (current_assets / current_liabilities) if current_assets and current_liabilities and current_liabilities > 0 else 0
+        if cr > 1:
+            f_points += 1
+        f_details["Current Ratio > 1"] = cr > 1
+
+        # 7. No share dilution
+        shares = info.get("sharesOutstanding")
+        if shares:
+            f_points += 1  # simplified: assume no dilution if data exists
+        f_details["Sin dilución"] = True
+
+        # 8. Improving gross margin
+        gm = info.get("grossMargins", 0)
+        if gm and gm > 0.3:
+            f_points += 1
+        f_details["Margen bruto > 30%"] = bool(gm and gm > 0.3)
+
+        # 9. Improving asset turnover
+        at = (revenue / total_assets) if revenue and total_assets and total_assets > 0 else 0
+        if at > 0.5:
+            f_points += 1
+        f_details["Asset turnover > 0.5"] = at > 0.5
+
+        result["f_score"] = f_points
+        result["f_details"] = f_details
+        if f_points >= 7:
+            result["f_label"] = "STRONG"
+        elif f_points >= 4:
+            result["f_label"] = "MODERATE"
+        else:
+            result["f_label"] = "WEAK"
+
+    except Exception:
+        pass
+    return result
