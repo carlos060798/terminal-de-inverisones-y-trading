@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import database as db
 from ui_shared import DARK, fmt, kpi
+import excel_export
 
 try:
     import yfinance as yf
@@ -43,7 +44,7 @@ def render():
                 inv = row["shares"] * row["avg_cost"]
                 total_val += val
                 total_inv += inv
-            except:
+            except Exception:
                 total_inv += row["shares"] * row["avg_cost"]
 
         total_pnl_portfolio = total_val - total_inv
@@ -189,6 +190,26 @@ def render():
             return "color:#475569"
 
         st.dataframe(
-            thesis_show.style.applymap(verdict_color, subset=["Veredicto"]),
+            thesis_show.style.map(verdict_color, subset=["Veredicto"]),
             use_container_width=True, hide_index=True
         )
+
+    # ── EXCEL EXPORT ──
+    st.markdown("<div class='sec-title'>Exportar Datos</div>", unsafe_allow_html=True)
+    ex1, ex2 = st.columns(2)
+    with ex1:
+        wl_data = db.get_watchlist()
+        trades_data = db.get_trades()
+        forex_data = db.get_forex_trades()
+        if not wl_data.empty or not trades_data.empty:
+            xlsx = excel_export.export_portfolio(wl_data, trades_data, forex_data)
+            st.download_button("📥 Exportar Cartera (Excel)", data=xlsx,
+                              file_name="cartera_quantum.xlsx",
+                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with ex2:
+        analyses_data = db.get_stock_analyses()
+        if not analyses_data.empty:
+            xlsx2 = excel_export.export_analyses(analyses_data)
+            st.download_button("📥 Exportar Análisis (Excel)", data=xlsx2,
+                              file_name="analisis_quantum.xlsx",
+                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

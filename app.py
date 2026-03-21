@@ -578,7 +578,7 @@ with st.sidebar:
            -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px;
            letter-spacing:-0.5px;'>💎 Quantum Retail</div>
       <div style='font-size:14px;font-weight:700;color:#e2e8f0 !important;letter-spacing:0.5px;'>Terminal</div>
-      <div style='font-size:10px;color:#3e5068 !important;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v3.0</div>
+      <div style='font-size:10px;color:#3e5068 !important;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v4.0</div>
     </div>
     <hr style='margin:0 16px 16px 16px;border-color:rgba(30,58,95,0.3);'>
     """, unsafe_allow_html=True)
@@ -590,7 +590,8 @@ with st.sidebar:
              "🎯  Tesis de Inversión",
              "👁️  Watchlist & Cartera",
              "📓  Diario de Trading",
-             "💱  Forex & Índices"],
+             "💱  Forex & Índices",
+             "📊  Contexto Macro"],
         label_visibility="collapsed"
     )
     st.markdown("""
@@ -622,4 +623,7 @@ elif "📓" in section:
     render()
 elif "💱" in section:
     from sections.forex_trading import render
+    render()
+elif "📊" in section:
+    from sections.macro_context import render
     render()

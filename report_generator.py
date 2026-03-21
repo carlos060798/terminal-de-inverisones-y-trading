@@ -306,7 +306,7 @@ def generate_report(ticker: str, parsed_data: dict = None,
                     for item in items[:5]:
                         if pdf.get_y() > 265:
                             pdf.add_page()
-                        text = str(item).encode("latin-1", "replace").decode("latin-1")
+                        text = str(item).encode("latin-1", "xmlcharrefreplace").decode("latin-1")
                         pdf.multi_cell(180, 5, f"  - {text}")
                     pdf.ln(2)
 
@@ -351,7 +351,7 @@ def generate_report(ticker: str, parsed_data: dict = None,
             pdf.cell(0, 7, "Caso Bull:", new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(40, 40, 40)
-            text = thesis["thesis_bull"].encode("latin-1", "replace").decode("latin-1")
+            text = thesis["thesis_bull"].encode("latin-1", "xmlcharrefreplace").decode("latin-1")
             pdf.multi_cell(180, 5, text)
             pdf.ln(2)
 
@@ -361,7 +361,7 @@ def generate_report(ticker: str, parsed_data: dict = None,
             pdf.cell(0, 7, "Caso Bear:", new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(40, 40, 40)
-            text = thesis["thesis_bear"].encode("latin-1", "replace").decode("latin-1")
+            text = thesis["thesis_bear"].encode("latin-1", "xmlcharrefreplace").decode("latin-1")
             pdf.multi_cell(180, 5, text)
             pdf.ln(2)
 
@@ -385,7 +385,7 @@ def generate_report(ticker: str, parsed_data: dict = None,
             for tip in tips[:10]:
                 if pdf.get_y() > 265:
                     pdf.add_page()
-                text = str(tip).encode("latin-1", "replace").decode("latin-1")
+                text = str(tip).encode("latin-1", "xmlcharrefreplace").decode("latin-1")
                 pdf.multi_cell(180, 5, f"  {text}")
                 pdf.ln(1)
 

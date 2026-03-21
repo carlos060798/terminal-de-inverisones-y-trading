@@ -160,6 +160,13 @@ def init_db():
         )
     """)
 
+    # Migration: add post-mortem columns to trades
+    for col in ["lecciones", "errores"]:
+        try:
+            c.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT DEFAULT ''")
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -205,7 +212,8 @@ def update_ticker(ticker: str, shares: float, avg_cost: float,
 
 # ── TRADES ─────────────────────────────────────────────────────────────────────
 def add_trade(trade_date, ticker, trade_type, entry_price,
-              exit_price, shares, strategy, psych_notes):
+              exit_price, shares, strategy, psych_notes,
+              lecciones="", errores=""):
     pnl, pnl_pct = None, None
     if exit_price and exit_price > 0:
         if trade_type == "Compra":
@@ -219,10 +227,11 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
     conn.execute(
         """INSERT INTO trades
            (trade_date, ticker, trade_type, entry_price, exit_price,
-            shares, pnl, pnl_pct, strategy, psych_notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            shares, pnl, pnl_pct, strategy, psych_notes, lecciones, errores)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), ticker.upper(), trade_type, entry_price,
-         exit_price, shares, pnl, pnl_pct, strategy, psych_notes)
+         exit_price, shares, pnl, pnl_pct, strategy, psych_notes,
+         lecciones, errores)
     )
     conn.commit()
     conn.close()

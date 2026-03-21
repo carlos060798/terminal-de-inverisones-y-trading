@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from datetime import date
 import database as db
 from ui_shared import DARK, kpi
+import excel_export
 
 
 def render():
@@ -33,9 +34,16 @@ def render():
         pn  = st.text_area("🧠 Notas Psicológicas",
                            placeholder="¿Seguiste el plan? ¿FOMO? ¿Entraste con convicción o con miedo?",
                            height=80)
+        lecc = st.text_area("📚 Lecciones Aprendidas",
+                            placeholder="¿Qué aprendiste de esta operación?",
+                            height=80)
+        errs = st.text_area("⚠️ Errores Cometidos",
+                            placeholder="¿Qué harías diferente?",
+                            height=80)
         if st.button("📝  Registrar operación"):
             if ttk.strip() and ep > 0 and sh > 0:
-                db.add_trade(td, ttk.strip(), tty, ep, xp if xp > 0 else None, sh, st_g, pn)
+                db.add_trade(td, ttk.strip(), tty, ep, xp if xp > 0 else None, sh, st_g, pn,
+                             lecc, errs)
                 st.success("✅ Operación registrada."); st.rerun()
             else:
                 st.warning("Completa Ticker, Precio de Entrada y Acciones.")
@@ -125,11 +133,13 @@ def render():
 
         st.markdown("<div class='sec-title'>Historial de Operaciones</div>", unsafe_allow_html=True)
         show = trades[["trade_date","ticker","trade_type","entry_price","exit_price",
-                        "shares","pnl","pnl_pct","strategy","psych_notes"]].copy()
+                        "shares","pnl","pnl_pct","strategy","psych_notes",
+                        "lecciones","errores"]].copy()
         show.columns = ["Fecha","Ticker","Tipo","Entrada $","Salida $",
-                        "Acciones","P&L $","P&L %","Estrategia","Notas"]
+                        "Acciones","P&L $","P&L %","Estrategia","Notas",
+                        "Lecciones Aprendidas","Errores Cometidos"]
         st.dataframe(
-            show.style.applymap(lambda v: "color:#34d399" if isinstance(v,(int,float)) and not pd.isna(v) and v>0
+            show.style.map(lambda v: "color:#34d399" if isinstance(v,(int,float)) and not pd.isna(v) and v>0
                                 else ("color:#f87171" if isinstance(v,(int,float)) and not pd.isna(v) and v<0
                                 else "color:#475569"), subset=["P&L $","P&L %"])
                      .format({"Entrada $":"${:.4f}","Salida $":"${:.4f}",
@@ -137,6 +147,14 @@ def render():
                               na_rep="Abierta"),
             use_container_width=True, hide_index=True
         )
+        # ── EXCEL EXPORT ──
+        trades_data = db.get_trades()
+        if not trades_data.empty:
+            xlsx = excel_export.export_portfolio(pd.DataFrame(), trades_data, pd.DataFrame())
+            st.download_button("📥 Exportar Trades (Excel)", data=xlsx,
+                              file_name="trades_quantum.xlsx",
+                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
         with st.expander("🗑️  Eliminar operación por ID"):
             del_id = st.number_input("ID de la operación", min_value=1, step=1, label_visibility="collapsed")
             if st.button("Eliminar"):

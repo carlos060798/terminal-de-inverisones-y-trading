@@ -405,3 +405,115 @@ def compute_advanced_metrics(ticker: str):
         pass
 
     return result
+
+
+def compute_quality_score(ticker: str, moat_rating: int = None) -> dict:
+    """Buffett/Dorsey quality checklist — Score 0-100."""
+    adv = compute_advanced_metrics(ticker)
+
+    criteria = [
+        ("ROE > 15%", adv.get("roe"), lambda v: v is not None and v > 15),
+        ("ROIC > 10%", adv.get("roic"), lambda v: v is not None and v > 10),
+        ("Deuda/EBITDA < 3x", adv.get("debt_ebitda"), lambda v: v is not None and v < 3),
+        ("Margen Bruto > 40%", adv.get("gross_margin"), lambda v: v is not None and v > 40),
+        ("Margen Operativo > 15%", adv.get("operating_margin"), lambda v: v is not None and v > 15),
+        ("CAGR Ingresos > 5%", adv.get("revenue_cagr_3y"), lambda v: v is not None and v > 5),
+        ("Cobertura Int. > 5x", adv.get("interest_coverage"), lambda v: v is not None and v > 5),
+        ("Crec. Sostenible > 8%", adv.get("sustainable_growth"), lambda v: v is not None and v > 8),
+        ("MOAT Rating >= 3", moat_rating, lambda v: v is not None and v >= 3),
+        ("FCF Positivo", None, None),  # special case
+    ]
+
+    # Check FCF from yfinance
+    try:
+        tk = yf.Ticker(ticker)
+        cf = tk.cashflow
+        if cf is not None and not cf.empty:
+            fcf_row = cf.loc["Free Cash Flow"] if "Free Cash Flow" in cf.index else None
+            if fcf_row is not None:
+                latest_fcf = fcf_row.iloc[0]
+                criteria[9] = ("FCF Positivo", latest_fcf, lambda v: v is not None and v > 0)
+    except Exception:
+        pass
+
+    results = []
+    passed = 0
+    for name, value, check in criteria:
+        if check is not None and value is not None:
+            ok = check(value)
+        else:
+            ok = False
+        results.append({"criterion": name, "value": value, "passed": ok})
+        if ok:
+            passed += 1
+
+    score = int(passed / len(criteria) * 100)
+    return {
+        "score": score,
+        "passed": passed,
+        "total": len(criteria),
+        "details": results,
+        "advanced": adv,
+    }
+
+
+def compute_dcf_scenarios(ticker: str, parsed_data: dict = None) -> dict:
+    """DCF with Pessimistic/Base/Optimistic scenarios."""
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+
+        # Get base growth rate (same logic as existing DCF)
+        roe = (info.get("returnOnEquity") or 0)
+        payout = info.get("payoutRatio") or 0.3
+        base_growth = roe * (1 - payout)
+        if base_growth <= 0:
+            base_growth = (info.get("revenueGrowth") or 0.05)
+        base_growth = max(0.02, min(base_growth, 0.30))
+
+        # Get EPS
+        eps = info.get("trailingEps") or 0
+        if eps <= 0:
+            return {}
+
+        scenarios = {
+            "pessimistic": {"growth": base_growth * 0.5, "discount": 0.12, "terminal": 0.02, "label": "Pesimista"},
+            "base":        {"growth": base_growth,       "discount": 0.10, "terminal": 0.03, "label": "Base"},
+            "optimistic":  {"growth": base_growth * 1.5, "discount": 0.08, "terminal": 0.04, "label": "Optimista"},
+        }
+
+        results = {}
+        for key, params in scenarios.items():
+            g = params["growth"]
+            r = params["discount"]
+            tg = params["terminal"]
+
+            # 5-year projected EPS
+            future_eps = []
+            current = eps
+            for _ in range(5):
+                current *= (1 + g)
+                future_eps.append(current)
+
+            # Terminal value
+            terminal = future_eps[-1] * (1 + tg) / (r - tg) if r > tg else 0
+
+            # Discount all to present
+            pv_eps = sum(e / (1 + r)**(i+1) for i, e in enumerate(future_eps))
+            pv_terminal = terminal / (1 + r)**5
+            fair_value = pv_eps + pv_terminal
+
+            results[key] = {
+                "fair_value": round(fair_value, 2),
+                "growth": round(g * 100, 1),
+                "discount": round(r * 100, 1),
+                "terminal": round(tg * 100, 1),
+                "label": params["label"],
+            }
+
+        results["current_price"] = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        results["eps"] = eps
+        results["base_growth"] = round(base_growth * 100, 1)
+        return results
+    except Exception:
+        return {}

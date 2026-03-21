@@ -2,6 +2,7 @@
 pages/stock_analyzer.py - PDF Stock Analyzer section
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
@@ -10,7 +11,229 @@ import pdf_parser
 import valuation
 import report_generator
 import translator
+import excel_export
 from ui_shared import DARK, IDEAL, score, fmt, kpi
+
+try:
+    from finvizfinance.quote import finvizfinance as fvz_quote
+except ImportError:
+    fvz_quote = None
+
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
+
+
+# ---------------------------------------------------------------------------
+# TradingView Widget
+# ---------------------------------------------------------------------------
+def _tradingview_chart(ticker: str, height: int = 500):
+    """Embed free TradingView Advanced Chart widget."""
+    html = f"""
+    <div class="tradingview-widget-container" style="height:{height}px;width:100%;">
+      <div id="tradingview_chart" style="height:100%;width:100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "autosize": true,
+        "symbol": "{ticker}",
+        "interval": "D",
+        "timezone": "America/New_York",
+        "theme": "dark",
+        "style": "1",
+        "locale": "es",
+        "toolbar_bg": "#0f1923",
+        "enable_publishing": false,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "container_id": "tradingview_chart",
+        "backgroundColor": "rgba(15,25,35,1)",
+        "gridColor": "rgba(30,45,64,0.3)"
+      }});
+      </script>
+    </div>
+    """
+    components.html(html, height=height + 10)
+
+
+# ---------------------------------------------------------------------------
+# Insider Trading
+# ---------------------------------------------------------------------------
+def _render_insider_trading(ticker: str):
+    """Show insider trading data from finvizfinance or yfinance fallback."""
+    insider_df = None
+
+    # Try finvizfinance first
+    if fvz_quote is not None:
+        try:
+            stock = fvz_quote(ticker)
+            insider_df = stock.ticker_inside_trader()
+            if insider_df is not None and not insider_df.empty:
+                insider_df = insider_df.head(15)
+        except Exception:
+            insider_df = None
+
+    # Fallback to yfinance
+    if (insider_df is None or insider_df.empty) and yf is not None:
+        try:
+            tk = yf.Ticker(ticker)
+            insider_df = tk.insider_transactions
+            if insider_df is not None and not insider_df.empty:
+                insider_df = insider_df.head(15)
+        except Exception:
+            insider_df = None
+
+    if insider_df is not None and not insider_df.empty:
+        st.dataframe(insider_df, use_container_width=True, hide_index=True)
+
+        # Quick summary
+        cols_lower = [c.lower() for c in insider_df.columns]
+        buy_count = 0
+        sell_count = 0
+        for _, row in insider_df.iterrows():
+            for col in insider_df.columns:
+                val = str(row[col]).lower()
+                if "buy" in val or "purchase" in val or "compra" in val:
+                    buy_count += 1
+                    break
+                elif "sale" in val or "sell" in val or "venta" in val:
+                    sell_count += 1
+                    break
+
+        if buy_count > sell_count:
+            st.success(f"🟢 Tendencia positiva: {buy_count} compras vs {sell_count} ventas de insiders")
+        elif sell_count > buy_count:
+            st.warning(f"🔴 Tendencia negativa: {sell_count} ventas vs {buy_count} compras de insiders")
+        else:
+            st.info(f"⚪ Actividad mixta: {buy_count} compras, {sell_count} ventas")
+    else:
+        st.info("No se encontraron datos de insider trading para este ticker.")
+
+
+# ---------------------------------------------------------------------------
+# Buffett/Dorsey Quality Score display
+# ---------------------------------------------------------------------------
+def _render_quality_score(ticker: str):
+    """Display Buffett/Dorsey quality checklist with gauge + detail."""
+    # Check for MOAT rating
+    moat_rating = None
+    thesis = db.get_investment_notes(ticker)
+    if thesis:
+        moat_rating = thesis.get("moat_rating")
+
+    with st.spinner("Calculando Checklist Buffett/Dorsey…"):
+        qs = valuation.compute_quality_score(ticker, moat_rating)
+
+    if not qs or "score" not in qs:
+        st.info("No se pudo calcular el quality score.")
+        return
+
+    sc = qs["score"]
+    sc_color = "#34d399" if sc >= 70 else ("#fbbf24" if sc >= 40 else "#f87171")
+    sc_bg = "#064e3b" if sc >= 70 else ("#422006" if sc >= 40 else "#451a03")
+    label = "EXCELENTE" if sc >= 70 else ("ACEPTABLE" if sc >= 40 else "DEBIL")
+
+    q1, q2 = st.columns([1, 2])
+    with q1:
+        fig_q = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=sc,
+            number=dict(suffix="/100", font=dict(color="#f0f6ff", size=28)),
+            title=dict(text="Quality Score", font=dict(color="#94a3b8", size=14)),
+            gauge=dict(
+                axis=dict(range=[0, 100], tickcolor="#475569",
+                         tickfont=dict(color="#475569", size=10)),
+                bar=dict(color=sc_color, thickness=0.7),
+                bgcolor="#0f1923", bordercolor="#1e2d40",
+                steps=[
+                    dict(range=[0, 40], color="rgba(248,113,113,0.1)"),
+                    dict(range=[40, 70], color="rgba(251,191,36,0.1)"),
+                    dict(range=[70, 100], color="rgba(52,211,153,0.1)"),
+                ],
+            )
+        ))
+        fig_q.update_layout(**DARK, height=250, margin=dict(l=20, r=20, t=50, b=10))
+        st.plotly_chart(fig_q, use_container_width=True)
+        st.markdown(f"""
+        <div style='text-align:center;background:{sc_bg};border:2px solid {sc_color};
+                    border-radius:10px;padding:8px;'>
+          <span style='color:{sc_color};font-weight:700;font-size:16px;'>{label}</span>
+          <span style='color:#64748b;font-size:12px;'> — {qs['passed']}/{qs['total']} criterios</span>
+        </div>""", unsafe_allow_html=True)
+
+    with q2:
+        for item in qs["details"]:
+            icon = "✅" if item["passed"] else "❌"
+            v = item["value"]
+            if v is not None:
+                if isinstance(v, float):
+                    v_str = f"{v:.2f}"
+                else:
+                    v_str = str(v)
+            else:
+                v_str = "N/A"
+            color = "#34d399" if item["passed"] else "#f87171"
+            st.markdown(f"""<div style='display:flex;justify-content:space-between;padding:4px 8px;
+                border-bottom:1px solid rgba(30,45,64,0.3);'>
+              <span style='color:#94a3b8;font-size:13px;'>{icon} {item['criterion']}</span>
+              <span style='color:{color};font-weight:600;font-size:13px;'>{v_str}</span>
+            </div>""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# DCF Scenarios display
+# ---------------------------------------------------------------------------
+def _render_dcf_scenarios(ticker: str, parsed_data: dict = None):
+    """Display DCF with 3 scenarios (Pessimistic/Base/Optimistic)."""
+    with st.spinner("Calculando escenarios DCF…"):
+        dcf = valuation.compute_dcf_scenarios(ticker, parsed_data)
+
+    if not dcf or "base" not in dcf:
+        st.info("No se pudieron calcular escenarios DCF (EPS ≤ 0 o datos insuficientes).")
+        return
+
+    current_price = dcf.get("current_price", 0)
+
+    # Bar chart
+    scenarios = ["pessimistic", "base", "optimistic"]
+    labels = [dcf[s]["label"] for s in scenarios]
+    values = [dcf[s]["fair_value"] for s in scenarios]
+    colors = ["#f87171", "#60a5fa", "#34d399"]
+
+    fig_dcf = go.Figure()
+    fig_dcf.add_trace(go.Bar(
+        x=labels, y=values,
+        marker_color=colors,
+        text=[f"${v:,.2f}" for v in values],
+        textposition="outside",
+        textfont=dict(color="#94a3b8", size=12),
+    ))
+    if current_price > 0:
+        fig_dcf.add_hline(y=current_price, line_dash="dash", line_color="#fbbf24",
+                          annotation_text=f"Precio Actual: ${current_price:,.2f}",
+                          annotation_font_color="#fbbf24")
+
+    fig_dcf.update_layout(**DARK, height=350,
+        title=dict(text="Fair Value — 3 Escenarios DCF", font=dict(color="#94a3b8", size=14), x=0.5),
+        yaxis_title="Fair Value ($)",
+        showlegend=False)
+    st.plotly_chart(fig_dcf, use_container_width=True)
+
+    # Details table
+    d1, d2, d3 = st.columns(3)
+    for col, key, color in [(d1, "pessimistic", "#f87171"), (d2, "base", "#60a5fa"), (d3, "optimistic", "#34d399")]:
+        s = dcf[key]
+        upside = ((s["fair_value"] / current_price - 1) * 100) if current_price > 0 else 0
+        col.markdown(f"""
+        <div class='metric-card' style='border-top:3px solid {color};'>
+          <div class='mc-label'>{s['label']}</div>
+          <div class='mc-value' style='color:{color};'>${s['fair_value']:,.2f}</div>
+          <div style='font-size:11px;color:#64748b;'>
+            Crec: {s['growth']}% · Desc: {s['discount']}% · Term: {s['terminal']}%<br>
+            Potencial: <span style='color:{"#34d399" if upside > 0 else "#f87171"};font-weight:600;'>{upside:+.1f}%</span>
+          </div>
+        </div>""", unsafe_allow_html=True)
 
 
 def render():
@@ -99,6 +322,14 @@ def render():
                       <div style='font-size:44px;font-weight:800;color:{ring_color};line-height:1.1;'>{pct:.0f}%</div>
                       <div style='font-size:12px;color:#64748b;margin-top:4px;'>{passed} / {total_c} criterios</div>
                     </div>""", unsafe_allow_html=True)
+
+                # ── TRADINGVIEW CHART ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("📈 TradingView — Chart en Tiempo Real", expanded=False):
+                        try:
+                            _tradingview_chart(ticker_name)
+                        except Exception:
+                            st.info("No se pudo cargar el chart de TradingView.")
 
                 # ── FAIR VALUE TRAFFIC LIGHT ──
                 fv = None
@@ -403,6 +634,30 @@ def render():
                         fig_g.update_layout(**DARK, height=200, margin=dict(l=24,r=24,t=40,b=10))
                         col.plotly_chart(fig_g, use_container_width=True)
 
+                # ── BUFFETT/DORSEY CHECKLIST ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("🏆 Checklist Buffett/Dorsey — Quality Score"):
+                        try:
+                            _render_quality_score(ticker_name)
+                        except Exception as e:
+                            st.warning(f"Error calculando quality score: {e}")
+
+                # ── DCF SCENARIOS ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("🎯 DCF — 3 Escenarios (Pesimista / Base / Optimista)"):
+                        try:
+                            _render_dcf_scenarios(ticker_name, parsed)
+                        except Exception as e:
+                            st.warning(f"Error calculando escenarios DCF: {e}")
+
+                # ── INSIDER TRADING ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("🕵️ Insider Trading — Transacciones de Insiders"):
+                        try:
+                            _render_insider_trading(ticker_name)
+                        except Exception as e:
+                            st.warning(f"Error obteniendo insider trading: {e}")
+
                 # ── AUTO-SAVE + REPORT ──
                 st.markdown("---")
                 # Auto-save on first analysis
@@ -442,6 +697,14 @@ def render():
                 st.error(f"Error procesando PDF: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+
+    # ── EXCEL EXPORT (analyses) ──
+    analyses_data = db.get_stock_analyses()
+    if not analyses_data.empty:
+        xlsx2 = excel_export.export_analyses(analyses_data)
+        st.download_button("📥 Exportar Análisis (Excel)", data=xlsx2,
+                          file_name="analisis_quantum.xlsx",
+                          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # ── SAVED ANALYSES TABLE ──
     st.markdown("<div class='sec-title'>Historial de Analisis</div>", unsafe_allow_html=True)
