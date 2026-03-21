@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.bak
+
+# NOTE: investment_data.db IS tracked intentionally for backup
