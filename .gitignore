@@ -23,8 +23,8 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
-# Streamlit
-.streamlit/
+# Streamlit (keep .streamlit/config.toml for cloud deploy)
+# .streamlit/secrets.toml  ← never commit secrets
 
 # Logs
 *.log
