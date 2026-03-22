@@ -588,6 +588,8 @@ _active = sac.tabs([
     sac.TabsItem(label="Forex", icon="currency-exchange"),
     sac.TabsItem(label="Macro", icon="bar-chart-line"),
     sac.TabsItem(label="Backtest", icon="graph-down"),
+    sac.TabsItem(label="Comparador", icon="arrows-angle-expand"),
+    sac.TabsItem(label="Alertas", icon="bell"),
     sac.TabsItem(label="Sistema", icon="gear"),
 ], color="blue", size="sm", return_index=False)
 
@@ -602,6 +604,8 @@ _routes = {
     "Forex": "sections.forex_trading",
     "Macro": "sections.macro_context",
     "Backtest": "sections.backtest",
+    "Comparador": "sections.comparator",
+    "Alertas": "sections.alerts",
     "Sistema": "sections.system_health",
 }
 if _active in _routes:

@@ -25,6 +25,7 @@ def start_streamlit():
     if _port_open(PORT):
         return
     flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    os.environ["QUANTUM_DESKTOP"] = "1"
     _proc = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run",
          os.path.join(BASE_DIR, "app.py"),

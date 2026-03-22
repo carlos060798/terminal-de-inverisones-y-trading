@@ -174,9 +174,10 @@ def render():
         trades_data = db.get_trades()
         if not trades_data.empty:
             xlsx = excel_export.export_portfolio(pd.DataFrame(), trades_data, pd.DataFrame())
-            st.download_button("📥 Exportar Trades (Excel)", data=xlsx,
-                              file_name="trades_quantum.xlsx",
-                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            import file_saver
+            file_saver.save_or_download(xlsx, "trades_quantum.xlsx",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "📥 Exportar Trades (Excel)", key="exp_trades")
 
         with st.expander("🗑️  Eliminar operación por ID"):
             del_id = st.number_input("ID de la operación", min_value=1, step=1, label_visibility="collapsed")

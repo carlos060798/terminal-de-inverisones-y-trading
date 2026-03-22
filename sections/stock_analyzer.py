@@ -1064,11 +1064,13 @@ def render():
                             advanced=adv,
                             thesis=thesis_data if thesis_data else None,
                         )
-                        st.download_button(
-                            "Descargar Informe PDF",
-                            data=pdf_bytes,
-                            file_name=f"{ticker_name}_informe_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
+                        import file_saver
+                        file_saver.save_or_download(
+                            pdf_bytes,
+                            f"{ticker_name}_informe_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            "application/pdf",
+                            "📥 Descargar Informe PDF",
+                            key="exp_pdf_report",
                         )
                     except Exception as e:
                         st.warning(f"Error generando informe: {e}")
@@ -1251,9 +1253,10 @@ def render():
     analyses_data = db.get_stock_analyses()
     if not analyses_data.empty:
         xlsx2 = excel_export.export_analyses(analyses_data)
-        st.download_button("📥 Exportar Análisis (Excel)", data=xlsx2,
-                          file_name="analisis_quantum.xlsx",
-                          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        import file_saver
+        file_saver.save_or_download(xlsx2, "analisis_quantum.xlsx",
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                          "📥 Exportar Análisis (Excel)", key="exp_analisis_sa")
 
     # ── SAVED ANALYSES TABLE ──
     st.markdown("<div class='sec-title'>Historial de Analisis</div>", unsafe_allow_html=True)

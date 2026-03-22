@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_PANDAS_TA = False
 
+try:
+    from scipy.optimize import minimize as scipy_minimize
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
 
 def _calc_rsi(series, period=14):
     """Calculate RSI indicator."""
@@ -54,9 +60,9 @@ def render():
     </div>""", unsafe_allow_html=True)
 
     # ── TABS ──
-    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt = st.tabs([
+    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt, tab_rebal = st.tabs([
         "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora",
-        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización"
+        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización", "⚖️ Rebalanceo"
     ])
 
     # ══════════════════════════════════════════════════════════════
@@ -180,6 +186,36 @@ def render():
                 db.remove_ticker(del_t)
                 st.success(f"✅ {del_t} eliminado.")
                 st.rerun()
+
+        # ── Edit Notes ──
+        try:
+            with st.expander("📝 Editar Notas"):
+                note_ticker = st.selectbox(
+                    "Selecciona ticker", tickers, key="note_ticker_sel"
+                )
+                if note_ticker:
+                    row_data = wl[wl["ticker"] == note_ticker].iloc[0]
+                    current_notes = row_data.get("notes", "") if pd.notna(row_data.get("notes", "")) else ""
+                    new_notes = st.text_area(
+                        "Notas", value=str(current_notes),
+                        height=120, key="note_text_area",
+                        placeholder="Escribe tus notas sobre esta posicion..."
+                    )
+                    if st.button("Guardar Notas", key="save_notes_btn"):
+                        try:
+                            db.update_ticker(
+                                note_ticker,
+                                float(row_data.get("shares", 0)),
+                                float(row_data.get("avg_cost", 0)),
+                                str(row_data.get("sector", "")),
+                                new_notes,
+                            )
+                            st.success(f"Notas guardadas para {note_ticker}.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar notas: {e}")
+        except Exception as e:
+            st.info(f"No se pudo cargar el editor de notas: {e}")
 
     # ══════════════════════════════════════════════════════════════
     # TAB 2: ANÁLISIS TÉCNICO (RSI + MACD + Candlestick)
@@ -566,6 +602,135 @@ def render():
                     showlegend=False)
                 st.plotly_chart(fig_yield, use_container_width=True)
 
+        # ── DIVIDEND ENHANCEMENTS ──────────────────────────────────────
+        try:
+            st.markdown("<div class='sec-title'>Historial de Dividendos & Proyecciones</div>", unsafe_allow_html=True)
+
+            # Dividend History Chart per ticker
+            div_ticker_sel = st.selectbox(
+                "Selecciona ticker para historial de dividendos",
+                tickers4,
+                key="div_hist_ticker",
+            )
+
+            if div_ticker_sel:
+                obj_div = yf.Ticker(div_ticker_sel)
+                divs_hist = obj_div.dividends
+
+                if not divs_hist.empty and len(divs_hist) > 0:
+                    # Bar chart of dividend history
+                    fig_div_hist = go.Figure(go.Bar(
+                        x=divs_hist.index,
+                        y=divs_hist.values,
+                        marker_color="#34d399",
+                        text=[f"${v:.4f}" for v in divs_hist.values],
+                        textposition="outside",
+                        textfont=dict(color="#94a3b8", size=9),
+                    ))
+                    fig_div_hist.update_layout(
+                        **DARK, height=350,
+                        title=dict(
+                            text=f"Historial de Dividendos — {div_ticker_sel}",
+                            font=dict(color="#94a3b8", size=13), x=0.5,
+                        ),
+                        xaxis_title="Fecha",
+                        yaxis_title="Dividendo ($)",
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_div_hist, use_container_width=True)
+
+                    # Dividend Growth Rate (CAGR)
+                    if len(divs_hist) >= 2:
+                        # Group by year and sum annual dividends
+                        annual_divs = divs_hist.groupby(divs_hist.index.year).sum()
+                        if len(annual_divs) >= 2:
+                            first_year_div = annual_divs.iloc[0]
+                            last_year_div = annual_divs.iloc[-1]
+                            n_years = len(annual_divs) - 1
+                            if first_year_div > 0 and last_year_div > 0 and n_years > 0:
+                                cagr = ((last_year_div / first_year_div) ** (1 / n_years) - 1) * 100
+                                st.markdown(
+                                    kpi("CAGR Dividendos", f"{cagr:+.2f}%",
+                                        f"{n_years} anos ({annual_divs.index[0]}-{annual_divs.index[-1]})",
+                                        "green" if cagr > 0 else "red"),
+                                    unsafe_allow_html=True,
+                                )
+                else:
+                    st.info(f"{div_ticker_sel} no tiene historial de dividendos.")
+
+            # Projected Annual Income
+            st.markdown("<div class='sec-title'>Ingreso Anual Proyectado por Dividendos</div>", unsafe_allow_html=True)
+            proj_rows = []
+            for tk in tickers4:
+                try:
+                    obj_p = yf.Ticker(tk)
+                    info_p = obj_p.info
+                    div_rate = info_p.get("dividendRate") or 0
+                    shares_held = wl4.loc[wl4["ticker"] == tk, "shares"].values[0]
+                    proj_income = div_rate * shares_held
+                    if proj_income > 0:
+                        proj_rows.append({
+                            "Ticker": tk,
+                            "Div Rate ($)": round(div_rate, 4),
+                            "Acciones": shares_held,
+                            "Ingreso Anual ($)": round(proj_income, 2),
+                            "Ingreso Mensual ($)": round(proj_income / 12, 2),
+                        })
+                except Exception:
+                    pass
+
+            if proj_rows:
+                proj_df = pd.DataFrame(proj_rows)
+                total_proj = proj_df["Ingreso Anual ($)"].sum()
+                pj1, pj2 = st.columns(2)
+                pj1.markdown(kpi("Ingreso Anual Proyectado", f"${total_proj:,.2f}", "basado en div rate actual", "green"), unsafe_allow_html=True)
+                pj2.markdown(kpi("Ingreso Mensual Proyectado", f"${total_proj/12:,.2f}", "", "blue"), unsafe_allow_html=True)
+                st.dataframe(
+                    proj_df.style.format({
+                        "Div Rate ($)": "${:.4f}",
+                        "Acciones": "{:.0f}",
+                        "Ingreso Anual ($)": "${:.2f}",
+                        "Ingreso Mensual ($)": "${:.2f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.info("Ninguna posicion tiene dividendos proyectados.")
+
+            # Ex-Dividend Calendar
+            st.markdown("<div class='sec-title'>Calendario Ex-Dividendo</div>", unsafe_allow_html=True)
+            exdiv_rows = []
+            for tk in tickers4:
+                try:
+                    obj_ex = yf.Ticker(tk)
+                    info_ex = obj_ex.info
+                    ex_date = info_ex.get("exDividendDate")
+                    if ex_date:
+                        from datetime import datetime
+                        if isinstance(ex_date, (int, float)):
+                            ex_date_str = datetime.fromtimestamp(ex_date).strftime("%Y-%m-%d")
+                        else:
+                            ex_date_str = str(ex_date)
+                        div_amount = info_ex.get("dividendRate") or info_ex.get("lastDividendValue") or 0
+                        exdiv_rows.append({
+                            "Ticker": tk,
+                            "Fecha Ex-Dividendo": ex_date_str,
+                            "Dividendo ($)": round(div_amount, 4) if div_amount else "N/A",
+                            "Yield %": round((info_ex.get("dividendYield") or 0) * 100, 2),
+                        })
+                except Exception:
+                    pass
+
+            if exdiv_rows:
+                exdiv_df = pd.DataFrame(exdiv_rows)
+                exdiv_df = exdiv_df.sort_values("Fecha Ex-Dividendo")
+                st.dataframe(exdiv_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No se encontraron fechas ex-dividendo para los tickers en tu watchlist.")
+
+        except Exception as e:
+            st.error(f"Error en enhancements de dividendos: {e}")
+
     # ══════════════════════════════════════════════════════════════
     # TAB 5: CALCULADORA DE POSICIÓN
     # ══════════════════════════════════════════════════════════════
@@ -820,129 +985,427 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_opt:
         try:
-            if not HAS_PYPFOPT:
-                st.warning("Instala `pypfopt` para usar esta sección: `pip install pyportfolioopt`")
+            rows = db.get_watchlist()
+            if not rows:
+                st.info("Agrega al menos 2 tickers a tu watchlist para optimizar la cartera.")
             else:
-                rows = db.get_watchlist()
-                if not rows:
-                    st.info("Agrega al menos 2 tickers a tu watchlist para optimizar la cartera.")
+                tickers = sorted(set(r[1] for r in rows))
+                if len(tickers) < 2:
+                    st.info("Se necesitan al menos 2 tickers para la optimización de cartera.")
                 else:
-                    tickers = sorted(set(r[1] for r in rows))
-                    if len(tickers) < 2:
-                        st.info("Se necesitan al menos 2 tickers para la optimización de cartera.")
-                    else:
-                        st.subheader("Frontera Eficiente — Optimización de Cartera")
-                        with st.spinner("Descargando precios (2 años)..."):
-                            prices = yf.download(tickers, period="2y", auto_adjust=True)["Close"]
-                            if isinstance(prices, pd.Series):
-                                prices = prices.to_frame()
-                            prices = prices.dropna(axis=1, how="all").dropna()
+                    opt_method = st.selectbox("Método", ["Frontera Eficiente", "Risk Parity"], key="opt_method")
 
-                        valid_tickers = list(prices.columns)
-                        if len(valid_tickers) < 2:
-                            st.warning("No se pudieron obtener datos suficientes para al menos 2 tickers.")
+                    if opt_method == "Frontera Eficiente":
+                        # ── Existing Efficient Frontier code ──
+                        if not HAS_PYPFOPT:
+                            st.warning("Instala `pypfopt` para usar esta sección: `pip install pyportfolioopt`")
                         else:
-                            # Expected returns & covariance
-                            mu = expected_returns.mean_historical_return(prices)
-                            S = risk_models.sample_cov(prices)
+                            st.subheader("Frontera Eficiente — Optimización de Cartera")
+                            with st.spinner("Descargando precios (2 años)..."):
+                                prices = yf.download(tickers, period="2y", auto_adjust=True)["Close"]
+                                if isinstance(prices, pd.Series):
+                                    prices = prices.to_frame()
+                                prices = prices.dropna(axis=1, how="all").dropna()
 
-                            # Max Sharpe portfolio
-                            ef_sharpe = EfficientFrontier(mu, S)
-                            ef_sharpe.max_sharpe()
-                            w_sharpe = ef_sharpe.clean_weights()
-                            perf_sharpe = ef_sharpe.portfolio_performance(verbose=False)
+                            valid_tickers = list(prices.columns)
+                            if len(valid_tickers) < 2:
+                                st.warning("No se pudieron obtener datos suficientes para al menos 2 tickers.")
+                            else:
+                                mu = expected_returns.mean_historical_return(prices)
+                                S = risk_models.sample_cov(prices)
 
-                            # Min Volatility portfolio
-                            ef_minvol = EfficientFrontier(mu, S)
-                            ef_minvol.min_volatility()
-                            w_minvol = ef_minvol.clean_weights()
-                            perf_minvol = ef_minvol.portfolio_performance(verbose=False)
+                                ef_sharpe = EfficientFrontier(mu, S)
+                                ef_sharpe.max_sharpe()
+                                w_sharpe = ef_sharpe.clean_weights()
+                                perf_sharpe = ef_sharpe.portfolio_performance(verbose=False)
 
-                            # KPIs for Max Sharpe
-                            k1, k2, k3 = st.columns(3)
-                            k1.markdown(kpi("Retorno Esperado", f"{perf_sharpe[0]*100:.1f}%", "Max Sharpe", "green"), unsafe_allow_html=True)
-                            k2.markdown(kpi("Volatilidad", f"{perf_sharpe[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
-                            k3.markdown(kpi("Sharpe Ratio", f"{perf_sharpe[2]:.2f}", "óptimo", "blue"), unsafe_allow_html=True)
+                                ef_minvol = EfficientFrontier(mu, S)
+                                ef_minvol.min_volatility()
+                                w_minvol = ef_minvol.clean_weights()
+                                perf_minvol = ef_minvol.portfolio_performance(verbose=False)
 
-                            # Generate 5000 random portfolios
-                            n_assets = len(valid_tickers)
-                            n_portfolios = 5000
-                            results = np.zeros((n_portfolios, 3))
-                            mu_arr = mu.values
-                            S_arr = S.values
+                                k1, k2, k3 = st.columns(3)
+                                k1.markdown(kpi("Retorno Esperado", f"{perf_sharpe[0]*100:.1f}%", "Max Sharpe", "green"), unsafe_allow_html=True)
+                                k2.markdown(kpi("Volatilidad", f"{perf_sharpe[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
+                                k3.markdown(kpi("Sharpe Ratio", f"{perf_sharpe[2]:.2f}", "óptimo", "blue"), unsafe_allow_html=True)
 
-                            np.random.seed(42)
-                            for i in range(n_portfolios):
-                                w = np.random.dirichlet(np.ones(n_assets))
-                                p_ret = np.dot(w, mu_arr)
-                                p_vol = np.sqrt(np.dot(w.T, np.dot(S_arr, w)))
-                                results[i, 0] = p_vol
-                                results[i, 1] = p_ret
-                                results[i, 2] = (p_ret - 0.02) / p_vol  # Sharpe with rf=2%
+                                n_assets = len(valid_tickers)
+                                n_portfolios = 5000
+                                results = np.zeros((n_portfolios, 3))
+                                mu_arr = mu.values
+                                S_arr = S.values
 
-                            # Scatter plot
-                            fig_ef = go.Figure()
-                            fig_ef.add_trace(go.Scatter(
-                                x=results[:, 0] * 100, y=results[:, 1] * 100,
-                                mode="markers",
-                                marker=dict(size=3, color=results[:, 2], colorscale="Viridis",
-                                            showscale=True, colorbar=dict(title="Sharpe")),
-                                name="Portafolios aleatorios",
-                                hovertemplate="Vol: %{x:.1f}%<br>Ret: %{y:.1f}%<extra></extra>"
-                            ))
-                            # Max Sharpe star
-                            fig_ef.add_trace(go.Scatter(
-                                x=[perf_sharpe[1] * 100], y=[perf_sharpe[0] * 100],
-                                mode="markers", name="Max Sharpe",
-                                marker=dict(symbol="star", size=18, color="#22c55e", line=dict(width=1, color="white"))
-                            ))
-                            # Min Vol star
-                            fig_ef.add_trace(go.Scatter(
-                                x=[perf_minvol[1] * 100], y=[perf_minvol[0] * 100],
-                                mode="markers", name="Min Volatilidad",
-                                marker=dict(symbol="star", size=18, color="#3b82f6", line=dict(width=1, color="white"))
-                            ))
-                            fig_ef.update_layout(
-                                **DARK, height=500,
-                                title=dict(text="Frontera Eficiente — 5000 portafolios simulados",
-                                           font=dict(color="#94a3b8", size=14), x=0.5),
-                                xaxis_title="Volatilidad (%)",
-                                yaxis_title="Retorno Esperado (%)",
-                                legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a")
-                            )
-                            st.plotly_chart(fig_ef, use_container_width=True)
+                                np.random.seed(42)
+                                for i in range(n_portfolios):
+                                    w = np.random.dirichlet(np.ones(n_assets))
+                                    p_ret = np.dot(w, mu_arr)
+                                    p_vol = np.sqrt(np.dot(w.T, np.dot(S_arr, w)))
+                                    results[i, 0] = p_vol
+                                    results[i, 1] = p_ret
+                                    results[i, 2] = (p_ret - 0.02) / p_vol
 
-                            # Allocation bar chart
-                            st.markdown("#### Asignación Óptima (Max Sharpe)")
-                            alloc_df = pd.DataFrame({
-                                "Ticker": list(w_sharpe.keys()),
-                                "Peso": [v * 100 for v in w_sharpe.values()]
-                            })
-                            alloc_df = alloc_df[alloc_df["Peso"] > 0.01].sort_values("Peso", ascending=True)
+                                fig_ef = go.Figure()
+                                fig_ef.add_trace(go.Scatter(
+                                    x=results[:, 0] * 100, y=results[:, 1] * 100,
+                                    mode="markers",
+                                    marker=dict(size=3, color=results[:, 2], colorscale="Viridis",
+                                                showscale=True, colorbar=dict(title="Sharpe")),
+                                    name="Portafolios aleatorios",
+                                    hovertemplate="Vol: %{x:.1f}%<br>Ret: %{y:.1f}%<extra></extra>"
+                                ))
+                                fig_ef.add_trace(go.Scatter(
+                                    x=[perf_sharpe[1] * 100], y=[perf_sharpe[0] * 100],
+                                    mode="markers", name="Max Sharpe",
+                                    marker=dict(symbol="star", size=18, color="#22c55e", line=dict(width=1, color="white"))
+                                ))
+                                fig_ef.add_trace(go.Scatter(
+                                    x=[perf_minvol[1] * 100], y=[perf_minvol[0] * 100],
+                                    mode="markers", name="Min Volatilidad",
+                                    marker=dict(symbol="star", size=18, color="#3b82f6", line=dict(width=1, color="white"))
+                                ))
+                                fig_ef.update_layout(
+                                    **DARK, height=500,
+                                    title=dict(text="Frontera Eficiente — 5000 portafolios simulados",
+                                               font=dict(color="#94a3b8", size=14), x=0.5),
+                                    xaxis_title="Volatilidad (%)",
+                                    yaxis_title="Retorno Esperado (%)",
+                                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a")
+                                )
+                                st.plotly_chart(fig_ef, use_container_width=True)
 
-                            fig_alloc = px.bar(alloc_df, x="Peso", y="Ticker", orientation="h",
-                                               text=alloc_df["Peso"].apply(lambda x: f"{x:.1f}%"),
-                                               color="Peso", color_continuous_scale="Viridis")
-                            fig_alloc.update_layout(
-                                **DARK, height=max(300, len(alloc_df) * 35),
-                                xaxis_title="Peso (%)", yaxis_title="",
-                                coloraxis_showscale=False
-                            )
-                            fig_alloc.update_traces(textposition="outside")
-                            st.plotly_chart(fig_alloc, use_container_width=True)
-
-                            # Min Vol comparison
-                            with st.expander("Ver cartera de Mínima Volatilidad"):
-                                mk1, mk2, mk3 = st.columns(3)
-                                mk1.markdown(kpi("Retorno Esperado", f"{perf_minvol[0]*100:.1f}%", "Min Vol", "green"), unsafe_allow_html=True)
-                                mk2.markdown(kpi("Volatilidad", f"{perf_minvol[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
-                                mk3.markdown(kpi("Sharpe Ratio", f"{perf_minvol[2]:.2f}", "", "blue"), unsafe_allow_html=True)
-
-                                alloc_mv = pd.DataFrame({
-                                    "Ticker": list(w_minvol.keys()),
-                                    "Peso (%)": [round(v * 100, 2) for v in w_minvol.values()]
+                                st.markdown("#### Asignación Óptima (Max Sharpe)")
+                                alloc_df = pd.DataFrame({
+                                    "Ticker": list(w_sharpe.keys()),
+                                    "Peso": [v * 100 for v in w_sharpe.values()]
                                 })
-                                alloc_mv = alloc_mv[alloc_mv["Peso (%)"] > 0.01].sort_values("Peso (%)", ascending=False)
-                                st.dataframe(alloc_mv, use_container_width=True, hide_index=True)
+                                alloc_df = alloc_df[alloc_df["Peso"] > 0.01].sort_values("Peso", ascending=True)
+
+                                fig_alloc = px.bar(alloc_df, x="Peso", y="Ticker", orientation="h",
+                                                   text=alloc_df["Peso"].apply(lambda x: f"{x:.1f}%"),
+                                                   color="Peso", color_continuous_scale="Viridis")
+                                fig_alloc.update_layout(
+                                    **DARK, height=max(300, len(alloc_df) * 35),
+                                    xaxis_title="Peso (%)", yaxis_title="",
+                                    coloraxis_showscale=False
+                                )
+                                fig_alloc.update_traces(textposition="outside")
+                                st.plotly_chart(fig_alloc, use_container_width=True)
+
+                                with st.expander("Ver cartera de Mínima Volatilidad"):
+                                    mk1, mk2, mk3 = st.columns(3)
+                                    mk1.markdown(kpi("Retorno Esperado", f"{perf_minvol[0]*100:.1f}%", "Min Vol", "green"), unsafe_allow_html=True)
+                                    mk2.markdown(kpi("Volatilidad", f"{perf_minvol[1]*100:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
+                                    mk3.markdown(kpi("Sharpe Ratio", f"{perf_minvol[2]:.2f}", "", "blue"), unsafe_allow_html=True)
+
+                                    alloc_mv = pd.DataFrame({
+                                        "Ticker": list(w_minvol.keys()),
+                                        "Peso (%)": [round(v * 100, 2) for v in w_minvol.values()]
+                                    })
+                                    alloc_mv = alloc_mv[alloc_mv["Peso (%)"] > 0.01].sort_values("Peso (%)", ascending=False)
+                                    st.dataframe(alloc_mv, use_container_width=True, hide_index=True)
+
+                    elif opt_method == "Risk Parity":
+                        # ── Risk Parity: Equal Risk Contribution ──
+                        if not HAS_SCIPY:
+                            st.warning("Instala `scipy` para usar Risk Parity: `pip install scipy`")
+                        else:
+                            st.subheader("Risk Parity — Contribución Igual al Riesgo")
+                            st.markdown("""
+                            <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                                        border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+                              <strong>Risk Parity</strong> asigna pesos de modo que cada activo contribuya
+                              la misma proporción al riesgo total del portafolio.
+                              Es robusto y no depende de estimaciones de retorno esperado.
+                            </div>""", unsafe_allow_html=True)
+
+                            with st.spinner("Descargando precios (2 años)..."):
+                                prices_rp = yf.download(tickers, period="2y", auto_adjust=True)["Close"]
+                                if isinstance(prices_rp, pd.Series):
+                                    prices_rp = prices_rp.to_frame()
+                                prices_rp = prices_rp.dropna(axis=1, how="all").dropna()
+
+                            valid_tickers_rp = list(prices_rp.columns)
+                            if len(valid_tickers_rp) < 2:
+                                st.warning("No se pudieron obtener datos suficientes para al menos 2 tickers.")
+                            else:
+                                returns_rp = prices_rp.pct_change().dropna()
+                                cov_matrix = returns_rp.cov().values * 252  # annualized
+                                n_assets_rp = len(valid_tickers_rp)
+
+                                # Risk parity objective: minimize sum of (RC_i - RC_target)^2
+                                def _risk_contrib(w, cov):
+                                    port_vol = np.sqrt(w @ cov @ w)
+                                    marginal = cov @ w
+                                    rc = w * marginal / port_vol
+                                    return rc
+
+                                def _risk_parity_obj(w, cov):
+                                    rc = _risk_contrib(w, cov)
+                                    target = np.ones(len(w)) / len(w)
+                                    rc_pct = rc / rc.sum()
+                                    return np.sum((rc_pct - target) ** 2)
+
+                                # Optimization
+                                x0 = np.ones(n_assets_rp) / n_assets_rp
+                                bounds = tuple((0.01, 1.0) for _ in range(n_assets_rp))
+                                constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
+
+                                result_rp = scipy_minimize(
+                                    _risk_parity_obj, x0, args=(cov_matrix,),
+                                    method="SLSQP", bounds=bounds, constraints=constraints,
+                                    options={"maxiter": 1000, "ftol": 1e-12}
+                                )
+
+                                if not result_rp.success:
+                                    st.warning(f"La optimización no convergió completamente: {result_rp.message}")
+
+                                w_rp = result_rp.x / result_rp.x.sum()  # normalize
+
+                                # Portfolio metrics
+                                mu_rp = returns_rp.mean().values * 252
+                                port_ret_rp = np.dot(w_rp, mu_rp) * 100
+                                port_vol_rp = np.sqrt(w_rp @ cov_matrix @ w_rp) * 100
+                                port_sharpe_rp = (port_ret_rp - 2.0) / port_vol_rp if port_vol_rp > 0 else 0
+
+                                # Equal-weight portfolio for comparison
+                                w_eq = np.ones(n_assets_rp) / n_assets_rp
+                                eq_ret = np.dot(w_eq, mu_rp) * 100
+                                eq_vol = np.sqrt(w_eq @ cov_matrix @ w_eq) * 100
+                                eq_sharpe = (eq_ret - 2.0) / eq_vol if eq_vol > 0 else 0
+
+                                # KPIs
+                                rk1, rk2, rk3 = st.columns(3)
+                                rk1.markdown(kpi("Retorno Esperado", f"{port_ret_rp:.1f}%", "Risk Parity", "green"), unsafe_allow_html=True)
+                                rk2.markdown(kpi("Volatilidad", f"{port_vol_rp:.1f}%", "anualizada", "red"), unsafe_allow_html=True)
+                                rk3.markdown(kpi("Sharpe Ratio", f"{port_sharpe_rp:.2f}", "rf=2%", "blue"), unsafe_allow_html=True)
+
+                                # Weights bar chart
+                                rp_alloc = pd.DataFrame({
+                                    "Ticker": valid_tickers_rp,
+                                    "Peso": w_rp * 100
+                                }).sort_values("Peso", ascending=True)
+
+                                fig_rp = px.bar(rp_alloc, x="Peso", y="Ticker", orientation="h",
+                                                text=rp_alloc["Peso"].apply(lambda x: f"{x:.1f}%"),
+                                                color="Peso", color_continuous_scale="Viridis")
+                                fig_rp.update_layout(
+                                    **DARK, height=max(300, n_assets_rp * 35),
+                                    title=dict(text="Asignación Risk Parity", font=dict(color="#94a3b8", size=14), x=0.5),
+                                    xaxis_title="Peso (%)", yaxis_title="",
+                                    coloraxis_showscale=False,
+                                )
+                                fig_rp.update_traces(textposition="outside")
+                                st.plotly_chart(fig_rp, use_container_width=True)
+
+                                # Risk contribution chart
+                                rc_vals = _risk_contrib(w_rp, cov_matrix)
+                                rc_pct = rc_vals / rc_vals.sum() * 100
+
+                                rc_df = pd.DataFrame({
+                                    "Ticker": valid_tickers_rp,
+                                    "Contribución al Riesgo (%)": rc_pct
+                                }).sort_values("Contribución al Riesgo (%)", ascending=True)
+
+                                fig_rc = px.bar(rc_df, x="Contribución al Riesgo (%)", y="Ticker", orientation="h",
+                                                text=rc_df["Contribución al Riesgo (%)"].apply(lambda x: f"{x:.1f}%"),
+                                                color_discrete_sequence=["#60a5fa"])
+                                fig_rc.update_layout(
+                                    **DARK, height=max(300, n_assets_rp * 35),
+                                    title=dict(text="Contribución al Riesgo por Activo (objetivo: iguales)",
+                                               font=dict(color="#94a3b8", size=14), x=0.5),
+                                    xaxis_title="Contribución (%)", yaxis_title="",
+                                )
+                                fig_rc.update_traces(textposition="outside")
+                                st.plotly_chart(fig_rc, use_container_width=True)
+
+                                # Comparison table: Risk Parity vs Equal Weight
+                                st.markdown("#### Comparación: Risk Parity vs Equal Weight")
+                                comp_df = pd.DataFrame({
+                                    "Métrica": ["Retorno Esperado", "Volatilidad", "Sharpe Ratio"],
+                                    "Risk Parity": [f"{port_ret_rp:.1f}%", f"{port_vol_rp:.1f}%", f"{port_sharpe_rp:.2f}"],
+                                    "Equal Weight": [f"{eq_ret:.1f}%", f"{eq_vol:.1f}%", f"{eq_sharpe:.2f}"],
+                                })
+                                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+                                # Detailed weights table
+                                with st.expander("Ver pesos detallados"):
+                                    detail_df = pd.DataFrame({
+                                        "Ticker": valid_tickers_rp,
+                                        "Risk Parity (%)": [round(w * 100, 2) for w in w_rp],
+                                        "Equal Weight (%)": [round(100 / n_assets_rp, 2)] * n_assets_rp,
+                                        "Contribución Riesgo (%)": [round(r, 2) for r in rc_pct],
+                                    }).sort_values("Risk Parity (%)", ascending=False)
+                                    st.dataframe(detail_df, use_container_width=True, hide_index=True)
         except Exception as e:
             st.error(f"Error en optimización de cartera: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 10: REBALANCEO DE CARTERA
+    # ══════════════════════════════════════════════════════════════
+    with tab_rebal:
+        try:
+            wl_rebal = db.get_watchlist()
+            if wl_rebal.empty:
+                st.info("Agrega tickers a tu watchlist primero.")
+            else:
+                tickers_rebal = wl_rebal["ticker"].tolist()
+                shares_map = dict(zip(wl_rebal["ticker"], wl_rebal["shares"]))
+
+                st.markdown("<div class='sec-title'>Rebalanceo de Cartera</div>", unsafe_allow_html=True)
+                st.markdown("""
+                <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                            border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+                  Define tu asignacion objetivo (%) para cada posicion y calcula las operaciones necesarias
+                  para rebalancear tu cartera.
+                </div>""", unsafe_allow_html=True)
+
+                # Fetch current prices
+                with st.spinner("Obteniendo precios actuales..."):
+                    rebal_data = []
+                    for tk in tickers_rebal:
+                        try:
+                            obj = yf.Ticker(tk)
+                            price = obj.fast_info.last_price or 0
+                            shares = shares_map.get(tk, 0)
+                            value = shares * price
+                            rebal_data.append({
+                                "ticker": tk,
+                                "shares": shares,
+                                "price": price,
+                                "value": value,
+                            })
+                        except Exception:
+                            rebal_data.append({
+                                "ticker": tk,
+                                "shares": shares_map.get(tk, 0),
+                                "price": 0,
+                                "value": 0,
+                            })
+
+                rebal_df = pd.DataFrame(rebal_data)
+                total_value = rebal_df["value"].sum()
+
+                if total_value <= 0:
+                    st.warning("El valor total de la cartera es $0. Verifica que tienes acciones con precio valido.")
+                else:
+                    rebal_df["current_pct"] = (rebal_df["value"] / total_value * 100)
+
+                    # Show current allocation
+                    st.markdown(f"**Valor total de cartera: ${total_value:,.2f}**")
+
+                    # Target allocation inputs
+                    st.markdown("<div class='sec-title'>Asignacion Objetivo (%)</div>", unsafe_allow_html=True)
+                    target_pcts = {}
+                    n_cols = min(4, len(tickers_rebal))
+                    col_groups = [tickers_rebal[i:i + n_cols] for i in range(0, len(tickers_rebal), n_cols)]
+
+                    for group in col_groups:
+                        cols_input = st.columns(len(group))
+                        for j, tk in enumerate(group):
+                            current = rebal_df.loc[rebal_df["ticker"] == tk, "current_pct"].values[0]
+                            target_pcts[tk] = cols_input[j].number_input(
+                                f"{tk} (%)",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=round(current, 1),
+                                step=0.5,
+                                key=f"rebal_target_{tk}",
+                            )
+
+                    total_target = sum(target_pcts.values())
+                    if abs(total_target - 100) > 0.1:
+                        st.warning(f"La suma de las asignaciones objetivo es {total_target:.1f}%. Debe ser 100%.")
+                    else:
+                        st.success(f"Total asignacion objetivo: {total_target:.1f}% ✓")
+
+                    # Calculate rebalancing actions
+                    if st.button("Calcular Rebalanceo", type="primary", key="rebal_calc_btn"):
+                        rebal_rows = []
+                        for _, row in rebal_df.iterrows():
+                            tk = row["ticker"]
+                            current_pct = row["current_pct"]
+                            target_pct = target_pcts.get(tk, 0)
+                            delta_pct = target_pct - current_pct
+                            target_value = total_value * (target_pct / 100)
+                            delta_value = target_value - row["value"]
+                            shares_to_trade = int(delta_value / row["price"]) if row["price"] > 0 else 0
+                            action = "Comprar" if delta_value > 0 else ("Vender" if delta_value < 0 else "Mantener")
+
+                            rebal_rows.append({
+                                "Ticker": tk,
+                                "Actual %": round(current_pct, 2),
+                                "Objetivo %": round(target_pct, 2),
+                                "Delta %": round(delta_pct, 2),
+                                "Accion": action,
+                                "Acciones a Operar": abs(shares_to_trade),
+                                "Monto ($)": round(abs(delta_value), 2),
+                            })
+
+                        # Add Total row
+                        rebal_rows.append({
+                            "Ticker": "TOTAL",
+                            "Actual %": round(sum(r["Actual %"] for r in rebal_rows), 2),
+                            "Objetivo %": round(sum(r["Objetivo %"] for r in rebal_rows), 2),
+                            "Delta %": 0,
+                            "Accion": "—",
+                            "Acciones a Operar": 0,
+                            "Monto ($)": 0,
+                        })
+
+                        result_df = pd.DataFrame(rebal_rows)
+
+                        def _color_action(val):
+                            if val == "Comprar":
+                                return "color:#34d399;font-weight:700"
+                            elif val == "Vender":
+                                return "color:#f87171;font-weight:700"
+                            return "color:#475569"
+
+                        def _color_delta(val):
+                            if isinstance(val, (int, float)):
+                                if val > 0:
+                                    return "color:#34d399"
+                                elif val < 0:
+                                    return "color:#f87171"
+                            return "color:#475569"
+
+                        st.markdown("<div class='sec-title'>Plan de Rebalanceo</div>", unsafe_allow_html=True)
+                        st.dataframe(
+                            result_df.style
+                                .map(_color_action, subset=["Accion"])
+                                .map(_color_delta, subset=["Delta %"])
+                                .format({
+                                    "Actual %": "{:.2f}%",
+                                    "Objetivo %": "{:.2f}%",
+                                    "Delta %": "{:+.2f}%",
+                                    "Acciones a Operar": "{:.0f}",
+                                    "Monto ($)": "${:,.2f}",
+                                }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                        # Visual comparison chart
+                        chart_data = result_df[result_df["Ticker"] != "TOTAL"]
+                        fig_rebal = go.Figure()
+                        fig_rebal.add_trace(go.Bar(
+                            x=chart_data["Ticker"], y=chart_data["Actual %"],
+                            name="Actual", marker_color="#60a5fa",
+                            text=[f"{v:.1f}%" for v in chart_data["Actual %"]],
+                            textposition="outside", textfont=dict(color="#60a5fa", size=10),
+                        ))
+                        fig_rebal.add_trace(go.Bar(
+                            x=chart_data["Ticker"], y=chart_data["Objetivo %"],
+                            name="Objetivo", marker_color="#a78bfa",
+                            text=[f"{v:.1f}%" for v in chart_data["Objetivo %"]],
+                            textposition="outside", textfont=dict(color="#a78bfa", size=10),
+                        ))
+                        fig_rebal.update_layout(
+                            **DARK, height=350, barmode="group",
+                            title=dict(text="Actual vs Objetivo", font=dict(color="#94a3b8", size=13), x=0.5),
+                            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"),
+                        )
+                        st.plotly_chart(fig_rebal, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error en rebalanceo: {e}")

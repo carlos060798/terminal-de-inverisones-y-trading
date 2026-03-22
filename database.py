@@ -160,6 +160,19 @@ def init_db():
         )
     """)
 
+    # --- Price Alerts ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS price_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            triggered INTEGER DEFAULT 0,
+            triggered_at TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     # Migration: add post-mortem columns to trades
     for col in ["lecciones", "errores"]:
         try:
@@ -435,5 +448,42 @@ def get_forex_trades() -> pd.DataFrame:
 def delete_forex_trade(trade_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM forex_trades WHERE id=?", (trade_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── PRICE ALERTS ──────────────────────────────────────────────────────────────
+def add_alert(ticker: str, direction: str, threshold: float):
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO price_alerts (ticker, direction, threshold) VALUES (?,?,?)",
+            (ticker.upper(), direction, threshold)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_alerts() -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM price_alerts ORDER BY created_at DESC", conn)
+    conn.close()
+    return df
+
+
+def delete_alert(alert_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM price_alerts WHERE id=?", (alert_id,))
+    conn.commit()
+    conn.close()
+
+
+def mark_triggered(alert_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE price_alerts SET triggered=1, triggered_at=datetime('now') WHERE id=?",
+        (alert_id,)
+    )
     conn.commit()
     conn.close()

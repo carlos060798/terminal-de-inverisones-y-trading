@@ -58,6 +58,20 @@ def _render_yfinance_screener():
         peg_max = fc7.number_input("PEG máximo", min_value=0.0, value=3.0, step=0.5)
         beta_max = fc8.number_input("Beta máximo", min_value=0.0, value=3.0, step=0.5)
 
+        fc9, fc10 = st.columns(2)
+        sector_filter = fc9.multiselect(
+            "Filtrar por Sector",
+            ["Technology", "Healthcare", "Financial Services", "Energy",
+             "Consumer Cyclical", "Consumer Defensive", "Industrials",
+             "Basic Materials", "Communication Services", "Real Estate", "Utilities"],
+            default=[],
+            key="yf_sector_filter",
+        )
+        country_filter = fc10.text_input(
+            "Filtrar por País", value="", placeholder="ej: United States",
+            key="yf_country_filter",
+        )
+
     if st.button("Escanear mercado", type="primary"):
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
         if not tickers:
@@ -89,6 +103,7 @@ def _render_yfinance_screener():
                     rev_growth = (info.get("revenueGrowth") or 0) * 100
                     earn_growth = (info.get("earningsGrowth") or 0) * 100
                     sector = info.get("sector", "")
+                    country = info.get("country", "")
                     name = info.get("shortName", ticker)
 
                     # Apply filters
@@ -122,6 +137,7 @@ def _render_yfinance_screener():
 
                     results.append({
                         "Ticker": ticker, "Empresa": name[:25], "Sector": sector,
+                        "País": country,
                         "Precio": price, "P/E": pe, "P/E Fwd": pe_fwd,
                         "ROE %": round(roe, 1), "Margen %": round(margin, 1),
                         "D/E": round(de, 2), "PEG": peg, "Beta": beta,
@@ -133,6 +149,13 @@ def _render_yfinance_screener():
                     continue
 
             progress.empty()
+
+        # ── Apply sector & country filters ──
+        if results and sector_filter:
+            results = [r for r in results if r.get("Sector", "") in sector_filter]
+        if results and country_filter.strip():
+            cf_lower = country_filter.strip().lower()
+            results = [r for r in results if cf_lower in r.get("País", "").lower()]
 
         if not results:
             st.warning("Ninguna acción pasó los filtros. Intenta con criterios más amplios.")
@@ -210,7 +233,7 @@ def _render_yfinance_screener():
                 return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
             return "background-color: rgba(248,113,113,0.15); color: #f87171"
 
-        display_cols = ["Ticker", "Empresa", "Sector", "Precio", "P/E", "P/E Fwd",
+        display_cols = ["Ticker", "Empresa", "Sector", "País", "Precio", "P/E", "P/E Fwd",
                         "ROE %", "Margen %", "D/E", "PEG", "Div %", "Crec Rev %", "Score", "Quant"]
         available_cols = [c for c in display_cols if c in df.columns]
         df_show = df[available_cols].copy()

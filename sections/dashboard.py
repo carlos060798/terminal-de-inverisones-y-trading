@@ -300,13 +300,15 @@ def render():
         forex_data = db.get_forex_trades()
         if not wl_data.empty or not trades_data.empty:
             xlsx = excel_export.export_portfolio(wl_data, trades_data, forex_data)
-            st.download_button("📥 Exportar Cartera (Excel)", data=xlsx,
-                              file_name="cartera_quantum.xlsx",
-                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            import file_saver
+            file_saver.save_or_download(xlsx, "cartera_quantum.xlsx",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "📥 Exportar Cartera (Excel)", key="exp_cartera")
     with ex2:
         analyses_data = db.get_stock_analyses()
         if not analyses_data.empty:
             xlsx2 = excel_export.export_analyses(analyses_data)
-            st.download_button("📥 Exportar Análisis (Excel)", data=xlsx2,
-                              file_name="analisis_quantum.xlsx",
-                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            import file_saver
+            file_saver.save_or_download(xlsx2, "analisis_quantum.xlsx",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "📥 Exportar Análisis (Excel)", key="exp_analisis")

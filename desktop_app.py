@@ -39,6 +39,9 @@ def start_streamlit():
     if sys.platform == "win32":
         flags = subprocess.CREATE_NO_WINDOW  # Sin consola en Windows
 
+    # Señal para que file_saver.py sepa que estamos en modo desktop
+    os.environ["QUANTUM_DESKTOP"] = "1"
+
     _streamlit_proc = subprocess.Popen(
         [
             sys.executable, "-m", "streamlit", "run",

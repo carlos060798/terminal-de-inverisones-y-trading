@@ -391,3 +391,98 @@ def generate_report(ticker: str, parsed_data: dict = None,
 
     # Output
     return pdf.output()
+
+
+def generate_backtest_report(ticker: str, strategy_name: str, params: dict,
+                              metrics: dict, trades_summary: dict = None) -> bytes:
+    """
+    Generate a PDF report for backtest results.
+
+    Args:
+        ticker: Stock ticker symbol
+        strategy_name: Name of the strategy used
+        params: Dictionary of strategy parameters
+        metrics: Dictionary with keys like total_return_strat, total_return_bh,
+                 sharpe, max_drawdown, buy_signals, sell_signals
+        trades_summary: Optional extra trade-level info
+
+    Returns bytes of the PDF file.
+    """
+    pdf = InvestmentReport(ticker, f"Backtest — {ticker}")
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    # ── TITLE ──
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(0, 80, 160)
+    pdf.cell(0, 14, f"Backtest Report: {ticker}", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 8, f"Generado: {datetime.now().strftime('%d %b %Y %H:%M')}",
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # ── STRATEGY INFO ──
+    pdf.section_title(f"Estrategia: {strategy_name}")
+    for k, v in params.items():
+        pdf.kv_row(str(k), str(v))
+    pdf.ln(2)
+
+    # ── PERFORMANCE METRICS ──
+    pdf.section_title("Metricas de Rendimiento")
+
+    strat_ret = metrics.get("total_return_strat", 0)
+    bh_ret = metrics.get("total_return_bh", 0)
+    alpha = strat_ret - bh_ret
+
+    perf_rows = [
+        ["Retorno Estrategia", f"{strat_ret:+.2f}%"],
+        ["Retorno Buy & Hold", f"{bh_ret:+.2f}%"],
+        ["Alpha", f"{alpha:+.2f}%"],
+        ["Sharpe Ratio", f"{metrics.get('sharpe', 0):.2f}"],
+        ["Max Drawdown", f"{metrics.get('max_drawdown', 0):.2f}%"],
+    ]
+    pdf.table(["Metrica", "Valor"], perf_rows, [95, 95])
+    pdf.ln(2)
+
+    # Signal badge for alpha
+    if alpha >= 0:
+        pdf.set_fill_color(34, 197, 94)
+        label = f"SUPERO Buy & Hold por {abs(alpha):.1f}%"
+    else:
+        pdf.set_fill_color(239, 68, 68)
+        label = f"POR DEBAJO de Buy & Hold por {abs(alpha):.1f}%"
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(190, 10, label, align="C", fill=True,
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # ── TRADE SUMMARY ──
+    pdf.section_title("Resumen de Operaciones")
+    buy_sig = metrics.get("buy_signals", 0)
+    sell_sig = metrics.get("sell_signals", 0)
+    total_ops = buy_sig + sell_sig
+
+    trade_rows = [
+        ["Senales de Compra", str(buy_sig)],
+        ["Senales de Venta", str(sell_sig)],
+        ["Total Operaciones", str(total_ops)],
+    ]
+    if trades_summary:
+        for k, v in trades_summary.items():
+            trade_rows.append([str(k), str(v)])
+
+    pdf.table(["Concepto", "Valor"], trade_rows, [95, 95])
+
+    # ── DISCLAIMER ──
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(150, 150, 150)
+    pdf.multi_cell(190, 4,
+        "Disclaimer: Este reporte es generado automaticamente con fines informativos. "
+        "Los resultados pasados no garantizan rendimientos futuros. "
+        "No constituye asesoria financiera.")
+
+    return pdf.output()
