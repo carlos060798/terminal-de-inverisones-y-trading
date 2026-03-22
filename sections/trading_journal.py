@@ -179,6 +179,108 @@ def render():
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               "📥 Exportar Trades (Excel)", key="exp_trades")
 
+        # ── FEATURE 7: Trade Recap Weekly/Monthly ──
+        with st.expander("📋 Resumen Periódico"):
+            try:
+                recap_trades = db.get_trades()
+                recap_closed = recap_trades[recap_trades["pnl"].notna()].copy()
+                if recap_closed.empty:
+                    st.info("No hay trades cerrados para generar resumen.")
+                else:
+                    recap_closed["trade_date"] = pd.to_datetime(recap_closed["trade_date"])
+                    recap_closed["week"] = recap_closed["trade_date"].dt.to_period("W").astype(str)
+                    recap_closed["month"] = recap_closed["trade_date"].dt.to_period("M").astype(str)
+
+                    def _calc_recap(group):
+                        n = len(group)
+                        wins_n = len(group[group["pnl"] > 0])
+                        wr_val = (wins_n / n * 100) if n > 0 else 0
+                        total_pnl = group["pnl"].sum()
+                        best = group["pnl"].max()
+                        worst = group["pnl"].min()
+                        return pd.Series({
+                            "# Trades": n,
+                            "Win Rate %": round(wr_val, 1),
+                            "Total P&L": round(total_pnl, 2),
+                            "Best Trade": round(best, 2),
+                            "Worst Trade": round(worst, 2),
+                        })
+
+                    recap_tab1, recap_tab2 = st.tabs(["Semanal", "Mensual"])
+
+                    with recap_tab1:
+                        weekly = recap_closed.groupby("week").apply(_calc_recap, include_groups=False).reset_index()
+                        weekly.rename(columns={"week": "Período"}, inplace=True)
+                        weekly = weekly.sort_values("Período", ascending=False)
+                        st.dataframe(
+                            weekly.style
+                                .map(lambda v: "color:#34d399" if isinstance(v, (int, float)) and v > 0
+                                     else ("color:#f87171" if isinstance(v, (int, float)) and v < 0 else ""),
+                                     subset=["Total P&L", "Best Trade", "Worst Trade"])
+                                .format({"Total P&L": "${:+,.2f}", "Best Trade": "${:+,.2f}",
+                                          "Worst Trade": "${:+,.2f}", "Win Rate %": "{:.1f}%"}),
+                            use_container_width=True, hide_index=True,
+                        )
+
+                    with recap_tab2:
+                        monthly = recap_closed.groupby("month").apply(_calc_recap, include_groups=False).reset_index()
+                        monthly.rename(columns={"month": "Período"}, inplace=True)
+                        monthly = monthly.sort_values("Período", ascending=False)
+                        st.dataframe(
+                            monthly.style
+                                .map(lambda v: "color:#34d399" if isinstance(v, (int, float)) and v > 0
+                                     else ("color:#f87171" if isinstance(v, (int, float)) and v < 0 else ""),
+                                     subset=["Total P&L", "Best Trade", "Worst Trade"])
+                                .format({"Total P&L": "${:+,.2f}", "Best Trade": "${:+,.2f}",
+                                          "Worst Trade": "${:+,.2f}", "Win Rate %": "{:.1f}%"}),
+                            use_container_width=True, hide_index=True,
+                        )
+
+                        # Monthly P&L bar chart
+                        monthly_chart = monthly.sort_values("Período", ascending=True)
+                        fig_monthly = go.Figure(go.Bar(
+                            x=monthly_chart["Período"],
+                            y=monthly_chart["Total P&L"],
+                            marker_color=[
+                                "#34d399" if v >= 0 else "#f87171"
+                                for v in monthly_chart["Total P&L"]
+                            ],
+                            text=[f"${v:+,.0f}" for v in monthly_chart["Total P&L"]],
+                            textposition="outside",
+                            textfont=dict(color="#94a3b8", size=10),
+                        ))
+                        fig_monthly.add_hline(y=0, line_dash="dot", line_color="#334155")
+                        fig_monthly.update_layout(**DARK, height=320,
+                            title=dict(text="P&L Mensual", font=dict(color="#94a3b8", size=13), x=0.5),
+                            showlegend=False,
+                            xaxis_title="Mes", yaxis_title="P&L ($)")
+                        st.plotly_chart(fig_monthly, use_container_width=True)
+
+                    # Streaks calculation
+                    st.markdown("**Rachas (Consecutive Wins/Losses)**")
+                    sorted_trades = recap_closed.sort_values("trade_date")
+                    max_win_streak = 0
+                    max_loss_streak = 0
+                    current_win = 0
+                    current_loss = 0
+                    for _, row in sorted_trades.iterrows():
+                        if row["pnl"] > 0:
+                            current_win += 1
+                            current_loss = 0
+                            max_win_streak = max(max_win_streak, current_win)
+                        else:
+                            current_loss += 1
+                            current_win = 0
+                            max_loss_streak = max(max_loss_streak, current_loss)
+
+                    sk1, sk2 = st.columns(2)
+                    sk1.markdown(kpi("🔥 Racha Ganadora Máx.", f"{max_win_streak} trades",
+                                     "consecutivos", "green"), unsafe_allow_html=True)
+                    sk2.markdown(kpi("❄️ Racha Perdedora Máx.", f"{max_loss_streak} trades",
+                                     "consecutivos", "red"), unsafe_allow_html=True)
+            except Exception as e:
+                st.warning(f"Error generando resumen periódico: {e}")
+
         with st.expander("🗑️  Eliminar operación por ID"):
             del_id = st.number_input("ID de la operación", min_value=1, step=1, label_visibility="collapsed")
             if st.button("Eliminar"):

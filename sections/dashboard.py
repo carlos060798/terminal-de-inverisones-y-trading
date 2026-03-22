@@ -4,7 +4,7 @@ sections/dashboard.py - Dashboard Overview / Home page
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 import database as db
 from ui_shared import DARK, dark_layout, fmt, kpi
 import excel_export
@@ -312,3 +312,90 @@ def render():
             file_saver.save_or_download(xlsx2, "analisis_quantum.xlsx",
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               "📥 Exportar Análisis (Excel)", key="exp_analisis")
+
+    # ── FEATURE 8: Corporate Actions Calendar ──
+    try:
+        cal_wl = db.get_watchlist()
+        if not cal_wl.empty and yf:
+            st.markdown("<div class='sec-title'>📅 Calendario Corporativo</div>", unsafe_allow_html=True)
+            events = []
+            today = datetime.now().date()
+            next_7 = today + timedelta(days=7)
+
+            for _, row in cal_wl.iterrows():
+                t = row["ticker"]
+                try:
+                    tk = yf.Ticker(t)
+
+                    # Earnings date
+                    try:
+                        cal_data = tk.calendar
+                        if cal_data is not None:
+                            if isinstance(cal_data, pd.DataFrame) and not cal_data.empty:
+                                if "Earnings Date" in cal_data.index:
+                                    ed_vals = cal_data.loc["Earnings Date"]
+                                    for ed_val in ed_vals:
+                                        if pd.notna(ed_val):
+                                            ed = pd.Timestamp(ed_val).date()
+                                            events.append({"Ticker": t, "Evento": "📊 Earnings",
+                                                           "Fecha": ed})
+                                            break
+                            elif isinstance(cal_data, dict):
+                                ed_list = cal_data.get("Earnings Date", [])
+                                if ed_list:
+                                    ed = pd.Timestamp(ed_list[0]).date()
+                                    events.append({"Ticker": t, "Evento": "📊 Earnings",
+                                                   "Fecha": ed})
+                    except Exception:
+                        pass
+
+                    # Ex-dividend date
+                    try:
+                        info = tk.info
+                        ex_div = info.get("exDividendDate")
+                        if ex_div:
+                            if isinstance(ex_div, (int, float)):
+                                ex_date = datetime.fromtimestamp(ex_div).date()
+                            else:
+                                ex_date = pd.Timestamp(ex_div).date()
+                            events.append({"Ticker": t, "Evento": "💰 Dividendo",
+                                           "Fecha": ex_date})
+                    except Exception:
+                        pass
+                except Exception:
+                    continue
+
+            if events:
+                ev_df = pd.DataFrame(events).sort_values("Fecha")
+                ev_df["Fecha"] = pd.to_datetime(ev_df["Fecha"])
+
+                # Highlight upcoming events (next 7 days)
+                upcoming = ev_df[
+                    (ev_df["Fecha"].dt.date >= today) &
+                    (ev_df["Fecha"].dt.date <= next_7)
+                ]
+                if not upcoming.empty:
+                    tickers_soon = ", ".join(upcoming["Ticker"].unique())
+                    st.warning(f"⚠️ Eventos en los próximos 7 días: {tickers_soon}")
+
+                # Display as styled table
+                ev_display = ev_df.copy()
+                ev_display["Fecha"] = ev_display["Fecha"].dt.strftime("%Y-%m-%d")
+
+                def _highlight_soon(row):
+                    try:
+                        d = datetime.strptime(row["Fecha"], "%Y-%m-%d").date()
+                        if today <= d <= next_7:
+                            return ["background-color: rgba(234,179,8,0.12); color: #fde047"] * len(row)
+                    except Exception:
+                        pass
+                    return [""] * len(row)
+
+                st.dataframe(
+                    ev_display.style.apply(_highlight_soon, axis=1),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.info("No se encontraron eventos corporativos próximos para tu watchlist.")
+    except Exception as e:
+        st.info(f"No se pudo cargar el calendario corporativo: {e}")

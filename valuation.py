@@ -653,3 +653,103 @@ def compute_health_scores(ticker: str) -> dict:
     except Exception:
         pass
     return result
+
+
+def compute_wacc(ticker: str) -> dict:
+    """
+    Compute Weighted Average Cost of Capital (WACC).
+    WACC = (E/V × Ke) + (D/V × Kd × (1-T))
+    Returns dict with all components or empty dict on failure.
+    """
+    result = {}
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        financials = tk.financials
+        balance = tk.balance_sheet
+
+        # Risk-free rate from 10Y Treasury
+        try:
+            tnx = yf.Ticker("^TNX").history(period="5d")
+            rf = tnx["Close"].iloc[-1] / 100 if not tnx.empty else 0.04
+            if hasattr(rf, "item"):
+                rf = rf.item()
+        except Exception:
+            rf = 0.04
+
+        # Beta
+        beta = info.get("beta", 1.0) or 1.0
+
+        # Equity Risk Premium (standard)
+        erp = 0.055
+
+        # Cost of Equity: Ke = Rf + Beta * ERP
+        ke = rf + beta * erp
+
+        # Market Cap (equity value)
+        market_cap = info.get("marketCap", 0) or 0
+
+        # Total Debt
+        total_debt = info.get("totalDebt", 0) or 0
+
+        # Cost of Debt: interest expense / total debt
+        kd = 0.05  # default
+        try:
+            if financials is not None and not financials.empty and total_debt > 0:
+                interest = None
+                for label in ["Interest Expense", "Net Interest Income"]:
+                    if label in financials.index:
+                        interest = abs(float(financials.loc[label].iloc[0]))
+                        break
+                if interest and interest > 0:
+                    kd = interest / total_debt
+                    kd = min(kd, 0.20)  # cap at 20%
+        except Exception:
+            pass
+
+        # Tax Rate from income statement
+        tax_rate = 0.21  # default US corporate
+        try:
+            if financials is not None and not financials.empty:
+                pretax = None
+                tax_exp = None
+                for label in ["Pretax Income", "Income Before Tax"]:
+                    if label in financials.index:
+                        pretax = float(financials.loc[label].iloc[0])
+                        break
+                for label in ["Tax Provision", "Income Tax Expense"]:
+                    if label in financials.index:
+                        tax_exp = abs(float(financials.loc[label].iloc[0]))
+                        break
+                if pretax and pretax > 0 and tax_exp is not None:
+                    tax_rate = tax_exp / pretax
+                    tax_rate = max(0, min(tax_rate, 0.50))
+        except Exception:
+            pass
+
+        # Enterprise Value = E + D
+        ev = market_cap + total_debt
+        if ev <= 0:
+            return result
+
+        we = market_cap / ev  # weight of equity
+        wd = total_debt / ev  # weight of debt
+
+        wacc = (we * ke) + (wd * kd * (1 - tax_rate))
+
+        result = {
+            "wacc": wacc,
+            "ke": ke,
+            "kd": kd,
+            "rf": rf,
+            "beta": beta,
+            "erp": erp,
+            "tax_rate": tax_rate,
+            "we": we,
+            "wd": wd,
+            "market_cap": market_cap,
+            "total_debt": total_debt,
+        }
+    except Exception:
+        pass
+    return result

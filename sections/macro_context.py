@@ -5,7 +5,6 @@ Falls back to yfinance treasury symbols if FRED key not configured.
 """
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from ui_shared import DARK, dark_layout, kpi
@@ -111,7 +110,7 @@ def render():
           y agrégala en <code>.streamlit/secrets.toml</code>
         </div>""", unsafe_allow_html=True)
 
-    tab_yield, tab_macro, tab_vix = st.tabs(["📈 Yield Curve", "📊 Indicadores Macro", "😰 VIX & Sentimiento"])
+    tab_yield, tab_macro, tab_vix, tab_fx = st.tabs(["📈 Yield Curve", "📊 Indicadores Macro", "😰 VIX & Sentimiento", "💱 Monitor de Divisas"])
 
     # ══════════════════════════════════════════════════════════════
     # TAB 1: YIELD CURVE
@@ -368,3 +367,94 @@ def render():
                             </div>""", unsafe_allow_html=True)
         else:
             st.warning("No se pudieron obtener datos del VIX.")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 4: CURRENCY MONITOR (Bloomberg-style)
+    # ══════════════════════════════════════════════════════════════
+    with tab_fx:
+        try:
+            import plotly.graph_objects as _go_fx
+
+            st.markdown("<div class='sec-title'>Monitor de Divisas — Principales Pares</div>", unsafe_allow_html=True)
+
+            _fx_pairs = {
+                "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X", "USD/JPY": "USDJPY=X",
+                "USD/CHF": "USDCHF=X", "AUD/USD": "AUDUSD=X", "USD/CAD": "USDCAD=X",
+                "USD/MXN": "USDMXN=X", "USD/BRL": "USDBRL=X",
+            }
+            _fx_data = {}
+            with st.spinner("Descargando datos de divisas..."):
+                for _label, _sym in _fx_pairs.items():
+                    try:
+                        _h = yf.Ticker(_sym).history(period="5d")
+                        if not _h.empty and len(_h) >= 2:
+                            _cur = _h["Close"].iloc[-1]
+                            _prev = _h["Close"].iloc[-2]
+                            _chg = ((_cur - _prev) / _prev) * 100
+                            _fx_data[_label] = {"rate": float(_cur), "change": float(_chg), "symbol": _sym}
+                        elif not _h.empty:
+                            _fx_data[_label] = {"rate": float(_h["Close"].iloc[-1]), "change": 0.0, "symbol": _sym}
+                    except Exception:
+                        continue
+
+            if _fx_data:
+                # Display rate cards in grid
+                _fx_cols = st.columns(4)
+                for _i, (_pair, _info) in enumerate(_fx_data.items()):
+                    _col = _fx_cols[_i % 4]
+                    _chg_c = "#34d399" if _info["change"] >= 0 else "#f87171"
+                    _chg_sign = "+" if _info["change"] >= 0 else ""
+                    _col.markdown(f"""
+                    <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:10px;
+                                padding:14px;text-align:center;margin-bottom:8px;'>
+                      <div style='font-size:11px;color:#5a6f8a;font-weight:600;letter-spacing:1px;'>{_pair}</div>
+                      <div style='font-size:20px;font-weight:700;color:#f0f6ff;margin:4px 0;'>{_info["rate"]:.4f}</div>
+                      <div style='font-size:12px;color:{_chg_c};font-weight:600;'>{_chg_sign}{_info["change"]:.2f}%</div>
+                    </div>""", unsafe_allow_html=True)
+
+                # Cross-rates matrix (EUR, USD, GBP, JPY)
+                st.markdown("<div class='sec-title' style='margin-top:20px;'>Matriz de Tipos Cruzados</div>", unsafe_allow_html=True)
+                _currencies = ["EUR", "USD", "GBP", "JPY"]
+                # Build rates relative to USD
+                _to_usd = {"USD": 1.0}
+                if "EUR/USD" in _fx_data:
+                    _to_usd["EUR"] = _fx_data["EUR/USD"]["rate"]
+                if "GBP/USD" in _fx_data:
+                    _to_usd["GBP"] = _fx_data["GBP/USD"]["rate"]
+                if "USD/JPY" in _fx_data:
+                    _to_usd["JPY"] = 1.0 / _fx_data["USD/JPY"]["rate"]
+
+                _valid_ccy = [c for c in _currencies if c in _to_usd]
+                if len(_valid_ccy) >= 3:
+                    _matrix = []
+                    for _base in _valid_ccy:
+                        _row = []
+                        for _quote in _valid_ccy:
+                            if _base == _quote:
+                                _row.append(1.0)
+                            else:
+                                _row.append(_to_usd[_base] / _to_usd[_quote])
+                        _matrix.append(_row)
+
+                    _fig_mx = _go_fx.Figure(data=_go_fx.Heatmap(
+                        z=_matrix, x=_valid_ccy, y=_valid_ccy,
+                        text=[[f"{v:.4f}" for v in r] for r in _matrix],
+                        texttemplate="%{text}", textfont=dict(size=12, color="#f0f6ff"),
+                        colorscale=[[0, "#0a0a0a"], [0.5, "#1e3a5f"], [1, "#60a5fa"]],
+                        showscale=False,
+                        hovertemplate="%{y}/%{x}: %{z:.4f}<extra></extra>",
+                    ))
+                    _fig_mx.update_layout(
+                        paper_bgcolor="#000000", plot_bgcolor="#0a0a0a",
+                        font=dict(color="#94a3b8", size=12, family="Inter"),
+                        margin=dict(l=60, r=20, t=40, b=40), height=350,
+                        title=dict(text="Cross Rates Matrix",
+                                   font=dict(color="#94a3b8", size=13), x=0.5),
+                        xaxis=dict(side="top", tickfont=dict(color="#94a3b8", size=12)),
+                        yaxis=dict(tickfont=dict(color="#94a3b8", size=12)),
+                    )
+                    st.plotly_chart(_fig_mx, use_container_width=True)
+            else:
+                st.warning("No se pudieron obtener datos de divisas.")
+        except Exception as _e_fx:
+            st.warning(f"Error en monitor de divisas: {_e_fx}")

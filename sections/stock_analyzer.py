@@ -1114,6 +1114,160 @@ def render():
             except Exception:
                 st.info("No se pudieron cargar noticias.")
 
+        # ── News Monitor with Sentiment (Bloomberg-style) ──
+        with st.expander("📰 Noticias y Sentimiento", expanded=False):
+            try:
+                if yf is not None:
+                    _tk_news = yf.Ticker(ticker_solo)
+                    _news_items = getattr(_tk_news, "news", None) or []
+                    if _news_items:
+                        _pos_words = {"surge","jump","gain","rise","bull","profit","beat","upgrade",
+                                      "record","boost","high","rally","strong","growth","up","buy","positive"}
+                        _neg_words = {"fall","drop","crash","loss","bear","miss","downgrade","cut",
+                                      "low","decline","weak","risk","sell","negative","down","plunge","fear"}
+                        _pos_count = 0
+                        _neg_count = 0
+                        for _art in _news_items[:15]:
+                            _title = (_art.get("title") or "").lower()
+                            _pub = _art.get("publisher", "Unknown")
+                            _link = _art.get("link", "#")
+                            _ts = _art.get("providerPublishTime")
+                            _date_str = ""
+                            if _ts:
+                                try:
+                                    from datetime import timezone
+                                    _date_str = datetime.fromtimestamp(_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                                except Exception:
+                                    _date_str = str(_ts)
+                            # Count sentiment words
+                            _title_words = set(_title.split())
+                            _p = len(_title_words & _pos_words)
+                            _n = len(_title_words & _neg_words)
+                            _pos_count += _p
+                            _neg_count += _n
+                            if _p > _n:
+                                _badge = "<span style='color:#34d399;font-weight:600;'>POSITIVO</span>"
+                            elif _n > _p:
+                                _badge = "<span style='color:#f87171;font-weight:600;'>NEGATIVO</span>"
+                            else:
+                                _badge = "<span style='color:#94a3b8;font-weight:600;'>NEUTRAL</span>"
+                            st.markdown(f"""
+                            <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:10px;
+                                        padding:12px 16px;margin-bottom:8px;'>
+                              <div style='font-size:13px;color:#f0f6ff;font-weight:600;'>
+                                <a href='{_link}' target='_blank' style='color:#60a5fa;text-decoration:none;'>{_art.get("title","Sin titulo")}</a>
+                              </div>
+                              <div style='font-size:11px;color:#5a6f8a;margin-top:4px;'>
+                                {_pub} · {_date_str} · {_badge}
+                              </div>
+                            </div>""", unsafe_allow_html=True)
+                        # Overall sentiment summary
+                        _total_s = _pos_count + _neg_count
+                        if _total_s > 0:
+                            _pct_pos = _pos_count / _total_s * 100
+                            if _pct_pos >= 60:
+                                _overall_c, _overall_l = "#34d399", "SENTIMIENTO POSITIVO"
+                            elif _pct_pos <= 40:
+                                _overall_c, _overall_l = "#f87171", "SENTIMIENTO NEGATIVO"
+                            else:
+                                _overall_c, _overall_l = "#fbbf24", "SENTIMIENTO MIXTO"
+                        else:
+                            _overall_c, _overall_l = "#94a3b8", "NEUTRAL"
+                        st.markdown(f"""
+                        <div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);
+                                    border-radius:12px;padding:14px;text-align:center;margin-top:10px;'>
+                          <span style='color:{_overall_c};font-size:16px;font-weight:700;'>{_overall_l}</span>
+                          <span style='color:#5a6f8a;font-size:12px;margin-left:12px;'>
+                            (+{_pos_count} positivas / -{_neg_count} negativas en {len(_news_items[:15])} noticias)
+                          </span>
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        st.info("No se encontraron noticias recientes para este ticker.")
+            except Exception as _e_news:
+                st.info(f"No se pudieron cargar noticias con sentimiento: {_e_news}")
+
+        # ── WACC Calculator (Bloomberg-style) ──
+        with st.expander("💰 WACC (Costo de Capital)", expanded=False):
+            try:
+                _wacc_data = valuation.compute_wacc(ticker_solo)
+                if _wacc_data and _wacc_data.get("wacc") is not None:
+                    _wc1, _wc2, _wc3, _wc4 = st.columns(4)
+                    _wc1.markdown(kpi("WACC", f"{_wacc_data['wacc']*100:.2f}%", "Costo de Capital", "purple"), unsafe_allow_html=True)
+                    _wc2.markdown(kpi("Ke (Costo Equity)", f"{_wacc_data['ke']*100:.2f}%", f"Rf={_wacc_data['rf']*100:.1f}% + β×ERP", "blue"), unsafe_allow_html=True)
+                    _wc3.markdown(kpi("Kd (Costo Deuda)", f"{_wacc_data['kd']*100:.2f}%", f"After-tax: {_wacc_data['kd']*(1-_wacc_data['tax_rate'])*100:.2f}%", "blue"), unsafe_allow_html=True)
+                    _wc4.markdown(kpi("Tasa Impositiva", f"{_wacc_data['tax_rate']*100:.1f}%", "", "blue"), unsafe_allow_html=True)
+                    _wc5, _wc6, _wc7, _wc8 = st.columns(4)
+                    _wc5.markdown(kpi("Beta", f"{_wacc_data['beta']:.2f}", "", "blue"), unsafe_allow_html=True)
+                    _wc6.markdown(kpi("Risk-Free Rate", f"{_wacc_data['rf']*100:.2f}%", "Treasury 10Y", "green"), unsafe_allow_html=True)
+                    _wc7.markdown(kpi("Peso Equity", f"{_wacc_data['we']*100:.1f}%", fmt(_wacc_data['market_cap']), "purple"), unsafe_allow_html=True)
+                    _wc8.markdown(kpi("Peso Deuda", f"{_wacc_data['wd']*100:.1f}%", fmt(_wacc_data['total_debt']), "red"), unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div style='background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.2);
+                                border-radius:12px;padding:14px;color:#94a3b8;font-size:12px;margin-top:8px;'>
+                      <strong>Formula:</strong> WACC = (E/V × Ke) + (D/V × Kd × (1-T))<br>
+                      = ({_wacc_data['we']*100:.1f}% × {_wacc_data['ke']*100:.2f}%) + ({_wacc_data['wd']*100:.1f}% × {_wacc_data['kd']*100:.2f}% × (1 - {_wacc_data['tax_rate']*100:.1f}%))
+                      = <strong style='color:#a78bfa;'>{_wacc_data['wacc']*100:.2f}%</strong>
+                    </div>""", unsafe_allow_html=True)
+                else:
+                    st.info("No se pudo calcular el WACC. Datos financieros insuficientes.")
+            except Exception as _e_wacc:
+                st.warning(f"Error calculando WACC: {_e_wacc}")
+
+        # ── Intraday Chart with Volume Profile (Bloomberg-style) ──
+        with st.expander("📈 Gráfico Intraday", expanded=False):
+            try:
+                if yf is not None:
+                    _intra = yf.download(ticker_solo, period="1d", interval="5m", progress=False)
+                    if _intra is not None and not _intra.empty:
+                        # Flatten multi-level columns if needed
+                        if hasattr(_intra.columns, 'levels') and len(_intra.columns.levels) > 1:
+                            _intra.columns = _intra.columns.get_level_values(0)
+                        _open = _intra["Open"]
+                        _high = _intra["High"]
+                        _low = _intra["Low"]
+                        _close = _intra["Close"]
+                        _vol = _intra["Volume"]
+                        # Compute VWAP
+                        _typical = (_high + _low + _close) / 3
+                        _cum_tp_vol = (_typical * _vol).cumsum()
+                        _cum_vol = _vol.cumsum()
+                        _vwap = _cum_tp_vol / _cum_vol.replace(0, float('nan'))
+
+                        from plotly.subplots import make_subplots as _make_sub
+                        _fig_intra = _make_sub(rows=2, cols=1, shared_xaxes=True,
+                                               row_heights=[0.7, 0.3], vertical_spacing=0.03)
+                        _fig_intra.add_trace(go.Candlestick(
+                            x=_intra.index, open=_open, high=_high, low=_low, close=_close,
+                            increasing_line_color="#34d399", decreasing_line_color="#f87171",
+                            increasing_fillcolor="#34d399", decreasing_fillcolor="#f87171",
+                            name="Precio",
+                        ), row=1, col=1)
+                        _fig_intra.add_trace(go.Scatter(
+                            x=_intra.index, y=_vwap, mode="lines",
+                            line=dict(color="#a78bfa", width=1.5, dash="dot"),
+                            name="VWAP",
+                        ), row=1, col=1)
+                        _colors_vol = ["#34d399" if c >= o else "#f87171"
+                                        for c, o in zip(_close, _open)]
+                        _fig_intra.add_trace(go.Bar(
+                            x=_intra.index, y=_vol, marker_color=_colors_vol,
+                            opacity=0.5, name="Volumen",
+                        ), row=2, col=1)
+                        _fig_intra.update_layout(
+                            **dark_layout(height=500, showlegend=True, xaxis_rangeslider_visible=False,
+                                         title=dict(text=f"{ticker_solo} — Intraday 5min",
+                                                    font=dict(color="#94a3b8", size=14), x=0.5),
+                                         legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a",
+                                                     font=dict(color="#94a3b8", size=10))),
+                        )
+                        _fig_intra.update_xaxes(gridcolor="#1a1a1a", linecolor="#1a1a1a")
+                        _fig_intra.update_yaxes(gridcolor="#1a1a1a", linecolor="#1a1a1a")
+                        st.plotly_chart(_fig_intra, use_container_width=True)
+                    else:
+                        st.info("No hay datos intraday disponibles (mercado cerrado o ticker sin datos).")
+            except Exception as _e_intra:
+                st.warning(f"Error cargando gráfico intraday: {_e_intra}")
+
         # ── Fair Value ──
         with st.spinner("Calculando Fair Value…"):
             fv_solo = valuation.compute_fair_values(ticker_solo, {})
@@ -1220,6 +1374,168 @@ def render():
             _render_insider_trading(ticker_solo)
         except Exception as e:
             st.warning(f"Error obteniendo insider trading: {e}")
+
+        # ── FEATURE 10: Rolling Beta Analysis ──
+        with st.expander("β Beta Rolling"):
+            try:
+                import numpy as _np
+                bench_options = {"S&P 500": "^GSPC", "Nasdaq": "^IXIC", "Russell 2000": "^RUT"}
+                bench_name = st.selectbox("Benchmark", list(bench_options.keys()),
+                                          key="beta_bench_select")
+                bench_sym = bench_options[bench_name]
+
+                ticker_hist = yf.download(ticker_solo, period="2y", interval="1d", progress=False)
+                bench_hist = yf.download(bench_sym, period="2y", interval="1d", progress=False)
+
+                if not ticker_hist.empty and not bench_hist.empty:
+                    # Handle multi-level columns from yfinance
+                    if isinstance(ticker_hist.columns, pd.MultiIndex):
+                        tk_close = ticker_hist["Close"].iloc[:, 0]
+                    else:
+                        tk_close = ticker_hist["Close"]
+                    if isinstance(bench_hist.columns, pd.MultiIndex):
+                        bm_close = bench_hist["Close"].iloc[:, 0]
+                    else:
+                        bm_close = bench_hist["Close"]
+
+                    tk_ret = tk_close.pct_change().dropna()
+                    bm_ret = bm_close.pct_change().dropna()
+
+                    # Align dates
+                    common = tk_ret.index.intersection(bm_ret.index)
+                    tk_ret = tk_ret.loc[common]
+                    bm_ret = bm_ret.loc[common]
+
+                    # Rolling 60-day beta
+                    window = 60
+                    rolling_cov = tk_ret.rolling(window).cov(bm_ret)
+                    rolling_var = bm_ret.rolling(window).var()
+                    rolling_beta = (rolling_cov / rolling_var).dropna()
+
+                    if len(rolling_beta) > 0:
+                        current_beta = rolling_beta.iloc[-1]
+                        one_year_beta = rolling_beta.tail(252)
+                        avg_beta = one_year_beta.mean()
+                        min_beta = rolling_beta.min()
+                        max_beta = rolling_beta.max()
+
+                        bk1, bk2, bk3, bk4 = st.columns(4)
+                        beta_color = "green" if 0.8 <= current_beta <= 1.2 else "red"
+                        bk1.markdown(kpi("Beta Actual", f"{current_beta:.2f}",
+                                         f"vs {bench_name}", beta_color), unsafe_allow_html=True)
+                        bk2.markdown(kpi("Beta Prom. 1Y", f"{avg_beta:.2f}", "",
+                                         "blue"), unsafe_allow_html=True)
+                        bk3.markdown(kpi("Beta Mín.", f"{min_beta:.2f}", "",
+                                         "blue"), unsafe_allow_html=True)
+                        bk4.markdown(kpi("Beta Máx.", f"{max_beta:.2f}", "",
+                                         "blue"), unsafe_allow_html=True)
+
+                        fig_beta = go.Figure()
+                        fig_beta.add_trace(go.Scatter(
+                            x=rolling_beta.index, y=rolling_beta.values,
+                            mode="lines", name="Rolling Beta (60d)",
+                            line=dict(color="#60a5fa", width=2),
+                        ))
+                        fig_beta.add_hline(y=1.0, line_dash="dot", line_color="#fbbf24",
+                                           annotation_text="Beta = 1.0",
+                                           annotation_font_color="#fbbf24")
+                        fig_beta.update_layout(**DARK, height=350,
+                            title=dict(text=f"Rolling Beta (60d) vs {bench_name}",
+                                       font=dict(color="#94a3b8", size=13), x=0.5),
+                            yaxis_title="Beta", showlegend=False)
+                        st.plotly_chart(fig_beta, use_container_width=True)
+                    else:
+                        st.info("Datos insuficientes para calcular el rolling beta.")
+                else:
+                    st.info("No se pudieron descargar datos históricos.")
+            except Exception as e:
+                st.warning(f"Error calculando rolling beta: {e}")
+
+        # ── FEATURE 13: ESG Scores ──
+        with st.expander("🌱 ESG (Sostenibilidad)"):
+            try:
+                tk_esg = yf.Ticker(ticker_solo)
+                esg_data = tk_esg.sustainability
+                if esg_data is not None and not esg_data.empty:
+                    esg_dict = esg_data.to_dict()
+                    if isinstance(esg_dict, dict):
+                        first_key = list(esg_dict.keys())[0] if esg_dict else None
+                        if first_key and isinstance(esg_dict[first_key], dict):
+                            esg_vals = esg_dict[first_key]
+                        else:
+                            esg_vals = esg_dict
+                    else:
+                        esg_vals = {}
+
+                    env_score_val = esg_vals.get("environmentScore") or esg_vals.get("Environment Score")
+                    soc_score_val = esg_vals.get("socialScore") or esg_vals.get("Social Score")
+                    gov_score_val = esg_vals.get("governanceScore") or esg_vals.get("Governance Score")
+                    total_esg = esg_vals.get("totalEsg") or esg_vals.get("Total ESG Score")
+                    esg_perf = esg_vals.get("esgPerformance") or esg_vals.get("ESG Performance")
+
+                    if total_esg is not None:
+                        try:
+                            total_val = float(total_esg)
+                        except (TypeError, ValueError):
+                            total_val = 0
+
+                        if total_val <= 10:
+                            esg_rating = "Negligible Risk"
+                            esg_color = "#34d399"
+                        elif total_val <= 20:
+                            esg_rating = "Low Risk"
+                            esg_color = "#34d399"
+                        elif total_val <= 30:
+                            esg_rating = "Medium Risk"
+                            esg_color = "#fbbf24"
+                        elif total_val <= 40:
+                            esg_rating = "High Risk"
+                            esg_color = "#f87171"
+                        else:
+                            esg_rating = "Severe Risk"
+                            esg_color = "#f87171"
+
+                        st.markdown(f"""
+                        <div style='text-align:center;margin-bottom:16px;'>
+                          <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;'>
+                            ESG Risk Rating</div>
+                          <div style='font-size:28px;font-weight:800;color:{esg_color};margin:4px 0;'>
+                            {total_val:.1f}</div>
+                          <div style='font-size:14px;font-weight:600;color:{esg_color};'>{esg_rating}</div>
+                          {f"<div style='font-size:11px;color:#475569;margin-top:4px;'>Performance: {esg_perf}</div>" if esg_perf else ""}
+                        </div>""", unsafe_allow_html=True)
+
+                        esg_scores_list = [
+                            ("🌍 Environment", env_score_val, "#34d399"),
+                            ("👥 Social", soc_score_val, "#60a5fa"),
+                            ("🏛️ Governance", gov_score_val, "#a78bfa"),
+                        ]
+                        for esg_label, esg_val, esg_bar_color in esg_scores_list:
+                            if esg_val is not None:
+                                try:
+                                    v = float(esg_val)
+                                except (TypeError, ValueError):
+                                    continue
+                                pct = min(v / 30 * 100, 100)
+                                st.markdown(f"""
+                                <div style='margin-bottom:12px;'>
+                                  <div style='display:flex;justify-content:space-between;margin-bottom:4px;'>
+                                    <span style='color:#94a3b8;font-size:13px;'>{esg_label}</span>
+                                    <span style='color:{esg_bar_color};font-weight:600;font-size:13px;'>{v:.1f}</span>
+                                  </div>
+                                  <div style='background:#1a1a1a;border-radius:6px;height:10px;overflow:hidden;'>
+                                    <div style='background:{esg_bar_color};width:{pct}%;height:100%;border-radius:6px;
+                                                transition:width 0.5s ease;'></div>
+                                  </div>
+                                </div>""", unsafe_allow_html=True)
+                    else:
+                        st.info("Datos ESG disponibles pero sin puntuación total. Datos crudos:")
+                        st.dataframe(esg_data, use_container_width=True)
+                else:
+                    st.info("No hay datos ESG disponibles para este ticker. "
+                            "No todas las empresas tienen puntuaciones ESG en yfinance.")
+            except Exception as e:
+                st.warning(f"Error obteniendo datos ESG: {e}")
 
         # ── AI ANALYSIS (standalone) ──
         st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)

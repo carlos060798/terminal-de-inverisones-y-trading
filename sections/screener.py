@@ -4,7 +4,6 @@ Quick scan stocks by fundamental filters using yfinance & Finviz
 """
 import streamlit as st
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
@@ -553,6 +552,129 @@ def _render_sector_heatmap():
         st.error(f"Error al generar el heatmap: {e}")
 
 
+def _render_security_finder():
+    """Advanced security finder — search by company name or partial ticker."""
+    try:
+        st.markdown("<div class='sec-title'>Buscador de Acciones por Nombre</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                    border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+          Busca acciones por nombre de empresa o ticker parcial. Los resultados se obtienen de yfinance.
+        </div>""", unsafe_allow_html=True)
+
+        search_query = st.text_input("🔎 Nombre de empresa o ticker",
+                                      placeholder="Ej: Apple, Microsoft, Tesla, NVDA...",
+                                      key="finder_query")
+
+        # Common tickers lookup for name-based search
+        COMPANY_LOOKUP = {
+            "apple": "AAPL", "microsoft": "MSFT", "google": "GOOGL", "alphabet": "GOOGL",
+            "amazon": "AMZN", "meta": "META", "facebook": "META", "tesla": "TSLA",
+            "nvidia": "NVDA", "netflix": "NFLX", "disney": "DIS", "intel": "INTC",
+            "amd": "AMD", "salesforce": "CRM", "adobe": "ADBE", "oracle": "ORCL",
+            "ibm": "IBM", "cisco": "CSCO", "qualcomm": "QCOM", "paypal": "PYPL",
+            "shopify": "SHOP", "uber": "UBER", "airbnb": "ABNB", "spotify": "SPOT",
+            "coca cola": "KO", "coca-cola": "KO", "pepsi": "PEP", "pepsico": "PEP",
+            "walmart": "WMT", "costco": "COST", "nike": "NKE", "starbucks": "SBUX",
+            "mcdonalds": "MCD", "procter": "PG", "johnson": "JNJ",
+            "jpmorgan": "JPM", "jp morgan": "JPM", "goldman": "GS", "goldman sachs": "GS",
+            "bank of america": "BAC", "visa": "V", "mastercard": "MA",
+            "exxon": "XOM", "chevron": "CVX", "pfizer": "PFE", "moderna": "MRNA",
+            "berkshire": "BRK-B", "boeing": "BA", "caterpillar": "CAT",
+            "palantir": "PLTR", "snowflake": "SNOW", "crowdstrike": "CRWD",
+            "broadcom": "AVGO", "lilly": "LLY", "eli lilly": "LLY",
+            "unitedhealth": "UNH", "home depot": "HD", "target": "TGT",
+        }
+
+        if search_query and st.button("Buscar", type="primary", key="finder_btn"):
+            query_lower = search_query.strip().lower()
+            candidates = []
+
+            # First check direct ticker
+            candidates.append(search_query.strip().upper())
+
+            # Check name lookup
+            for name, ticker_val in COMPANY_LOOKUP.items():
+                if query_lower in name or name in query_lower:
+                    if ticker_val not in candidates:
+                        candidates.append(ticker_val)
+
+            # Also try as direct ticker (uppercase)
+            if len(candidates) <= 1:
+                # Try common suffixes for partial matches
+                for name, ticker_val in COMPANY_LOOKUP.items():
+                    if query_lower[:3] in name[:3]:
+                        if ticker_val not in candidates:
+                            candidates.append(ticker_val)
+
+            candidates = candidates[:10]  # Limit
+
+            with st.spinner(f"Buscando {len(candidates)} posibles coincidencias..."):
+                results = []
+                for sym in candidates:
+                    try:
+                        tk = yf.Ticker(sym)
+                        info = tk.info
+                        name = info.get("shortName") or info.get("longName", "")
+                        if not name and not info.get("currentPrice"):
+                            continue
+                        results.append({
+                            "Ticker": sym,
+                            "Empresa": (name or sym)[:40],
+                            "Sector": info.get("sector", "—"),
+                            "Industria": (info.get("industry", "—") or "—")[:30],
+                            "Mkt Cap": info.get("marketCap", 0),
+                            "Precio": info.get("currentPrice") or info.get("regularMarketPrice", 0),
+                            "P/E": info.get("trailingPE"),
+                            "Div %": round((info.get("dividendYield") or 0) * 100, 2),
+                        })
+                    except Exception:
+                        continue
+
+            if results:
+                res_df = pd.DataFrame(results)
+
+                st.markdown(f"**{len(results)} resultado(s) encontrado(s)**")
+                st.dataframe(
+                    res_df.style.format({
+                        "Precio": "${:.2f}",
+                        "P/E": "{:.1f}",
+                        "Div %": "{:.2f}%",
+                        "Mkt Cap": lambda v: f"${v/1e9:.1f}B" if v and v > 1e9
+                                   else (f"${v/1e6:.0f}M" if v and v > 1e6 else "—"),
+                    }, na_rep="—"),
+                    use_container_width=True, hide_index=True,
+                )
+
+                # Set active ticker
+                finder_select = st.selectbox(
+                    "Seleccionar ticker activo",
+                    [""] + [r["Ticker"] for r in results],
+                    key="finder_select",
+                )
+                if finder_select:
+                    import streamlit as _st
+                    _st.session_state.active_ticker = finder_select
+                    st.success(f"✅ Ticker activo: {finder_select}")
+
+                # Add to watchlist
+                finder_add = st.multiselect(
+                    "Agregar a Watchlist",
+                    [r["Ticker"] for r in results],
+                    key="finder_add_wl",
+                )
+                if st.button("Agregar a Watchlist", key="finder_add_btn") and finder_add:
+                    for t in finder_add:
+                        row = [r for r in results if r["Ticker"] == t][0]
+                        db.add_ticker(t, 0, row["Precio"], row.get("Sector", ""), "Desde buscador")
+                    st.success(f"{len(finder_add)} ticker(s) agregado(s) a la watchlist.")
+            else:
+                st.warning("No se encontraron resultados. Intenta con otro nombre o ticker.")
+
+    except Exception as e:
+        st.warning(f"Error en el buscador: {e}")
+
+
 def render():
     st.markdown("""
     <div class='top-header'>
@@ -562,7 +684,8 @@ def render():
       </div>
     </div>""", unsafe_allow_html=True)
 
-    tab_yf, tab_fvz, tab_heatmap = st.tabs(["📊 yfinance Screener", "🔍 Finviz Screener", "🗺️ Sector Heatmap"])
+    tab_yf, tab_fvz, tab_heatmap, tab_finder = st.tabs(
+        ["📊 yfinance Screener", "🔍 Finviz Screener", "🗺️ Sector Heatmap", "🔎 Buscador Avanzado"])
 
     with tab_yf:
         _render_yfinance_screener()
@@ -572,3 +695,6 @@ def render():
 
     with tab_heatmap:
         _render_sector_heatmap()
+
+    with tab_finder:
+        _render_security_finder()

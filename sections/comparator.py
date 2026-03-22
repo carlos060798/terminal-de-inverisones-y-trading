@@ -315,5 +315,62 @@ def render():
           <strong>Dividend:</strong> Yield y payout ratio
         </div>""", unsafe_allow_html=True)
 
+        # ══════════════════════════════════════════════════════════════
+        # SECTION 4: COMPARATIVE RETURNS (Bloomberg-style)
+        # ══════════════════════════════════════════════════════════════
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            st.markdown("<div class='sec-title'>📊 Retornos Comparativos</div>", unsafe_allow_html=True)
+
+            _periods = {
+                "1D": 2, "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "YTD": None,
+            }
+            _ret_rows = []
+            for _t in valid_tickers:
+                try:
+                    _hist_full = yf.Ticker(_t).history(period="1y")
+                    if _hist_full.empty:
+                        continue
+                    _cl = _hist_full["Close"]
+                    if hasattr(_cl, "columns"):
+                        _cl = _cl.iloc[:, 0]
+                    _last = _cl.iloc[-1]
+                    _row = {"Ticker": _t}
+                    for _pname, _days in _periods.items():
+                        try:
+                            if _pname == "YTD":
+                                _year_start = _dt(_dt.now().year, 1, 1)
+                                _ytd_data = _cl[_cl.index >= str(_year_start)]
+                                if not _ytd_data.empty:
+                                    _row[_pname] = round((_last / _ytd_data.iloc[0] - 1) * 100, 2)
+                                else:
+                                    _row[_pname] = None
+                            else:
+                                if len(_cl) > _days:
+                                    _row[_pname] = round((_last / _cl.iloc[-_days] - 1) * 100, 2)
+                                else:
+                                    _row[_pname] = None
+                        except Exception:
+                            _row[_pname] = None
+                    _ret_rows.append(_row)
+                except Exception:
+                    continue
+
+            if _ret_rows:
+                _ret_df = pd.DataFrame(_ret_rows)
+                _period_cols = [c for c in _ret_df.columns if c != "Ticker"]
+
+                def _color_returns(val):
+                    if isinstance(val, (int, float)) and pd.notna(val):
+                        return f"color: {'#34d399' if val >= 0 else '#f87171'}; font-weight: 600"
+                    return "color: #5a6f8a"
+
+                _styled = _ret_df.style.map(_color_returns, subset=_period_cols)
+                _format_dict = {c: "{:+.2f}%" for c in _period_cols}
+                _styled = _styled.format(_format_dict, na_rep="N/A")
+                st.dataframe(_styled, use_container_width=True, hide_index=True)
+        except Exception as _e_ret:
+            st.warning(f"Error calculando retornos comparativos: {_e_ret}")
+
     except Exception as e:
         st.error(f"Error en el comparador: {e}")
