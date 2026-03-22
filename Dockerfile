@@ -14,8 +14,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy app files
+# Copy app files and ensure writable
 COPY --chown=user . .
+RUN chmod -R 777 /app && mkdir -p /app/ml_models && chmod 777 /app/ml_models
 
 # Create .streamlit config for HF Spaces
 RUN mkdir -p .streamlit && \

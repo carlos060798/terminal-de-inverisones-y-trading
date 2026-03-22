@@ -7,7 +7,15 @@ import json
 import pandas as pd
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "investment_data.db")
+# Use /tmp for writable DB in containerized environments (HF Spaces, Docker)
+_app_dir = os.path.dirname(__file__)
+_db_in_app = os.path.join(_app_dir, "investment_data.db")
+if os.path.isfile(_db_in_app) and os.access(_app_dir, os.W_OK):
+    DB_PATH = _db_in_app
+elif os.access(_app_dir, os.W_OK):
+    DB_PATH = _db_in_app
+else:
+    DB_PATH = os.path.join("/tmp", "investment_data.db")
 
 
 def get_connection():
