@@ -655,6 +655,403 @@ def compute_health_scores(ticker: str) -> dict:
     return result
 
 
+def compute_dcf_professional(ticker: str) -> dict:
+    """Institutional DCF following InValor/JPMorgan methodology."""
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        inc = tk.income_stmt
+        bs = tk.balance_sheet
+        cf = tk.cashflow
+
+        if inc is None or inc.empty or bs is None or bs.empty or cf is None or cf.empty:
+            return {}
+
+        # Step 1: Calculate FCFF
+        ebit = None
+        for label in ["EBIT", "Operating Income"]:
+            if label in inc.index:
+                ebit = float(inc.loc[label].iloc[0])
+                break
+        if ebit is None:
+            return {}
+
+        # Tax rate from financials
+        tax_rate = 0.25
+        try:
+            pretax = None
+            tax_exp = None
+            for label in ["Pretax Income", "Income Before Tax"]:
+                if label in inc.index:
+                    pretax = float(inc.loc[label].iloc[0])
+                    break
+            for label in ["Tax Provision", "Income Tax Expense"]:
+                if label in inc.index:
+                    tax_exp = abs(float(inc.loc[label].iloc[0]))
+                    break
+            if pretax and pretax > 0 and tax_exp is not None:
+                tax_rate = max(0.0, min(tax_exp / pretax, 0.50))
+        except Exception:
+            pass
+
+        nopat = ebit * (1 - tax_rate)
+
+        da = 0
+        for label in ["Depreciation And Amortization", "Depreciation & Amortization"]:
+            if label in cf.index:
+                da = float(cf.loc[label].iloc[0])
+                break
+
+        capex = 0
+        for label in ["Capital Expenditure", "Capital Expenditures"]:
+            if label in cf.index:
+                capex = float(cf.loc[label].iloc[0])
+                break
+
+        wk_change = 0
+        for label in ["Change In Working Capital", "Changes In Working Capital"]:
+            if label in cf.index:
+                wk_change = float(cf.loc[label].iloc[0])
+                break
+
+        fcff = nopat + abs(da) - abs(capex) + wk_change
+
+        # Step 2: Project 5 years using revenue growth rate
+        rev_growth = info.get('revenueGrowth', 0.05) or 0.05
+        rev_growth = max(0.01, min(rev_growth, 0.40))
+        projected_fcff = [fcff * (1 + rev_growth) ** i for i in range(1, 6)]
+
+        # Step 3: Terminal Value (Gordon Growth)
+        g = 0.03
+        wacc_data = compute_wacc(ticker)
+        wacc = wacc_data.get('wacc', 0.10) if wacc_data else 0.10
+        if wacc <= g:
+            wacc = g + 0.02
+
+        terminal_value = projected_fcff[-1] * (1 + g) / (wacc - g)
+
+        # Step 4: Discount all to present
+        pv_fcff = sum(fcf / (1 + wacc) ** t for t, fcf in enumerate(projected_fcff, 1))
+        pv_terminal = terminal_value / (1 + wacc) ** 5
+        enterprise_value = pv_fcff + pv_terminal
+
+        # Step 5: Equity Value
+        total_debt = info.get('totalDebt', 0) or 0
+        cash = info.get('totalCash', 0) or 0
+        equity_value = enterprise_value - total_debt + cash
+        shares = info.get('sharesOutstanding', 1) or 1
+        fair_value_per_share = equity_value / shares
+
+        current_price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+        upside = ((fair_value_per_share - current_price) / current_price * 100) if current_price > 0 else 0
+
+        # Step 6: Sensitivity table (5x5 WACC vs g)
+        wacc_range = [round(wacc - 0.01, 4), round(wacc - 0.005, 4), round(wacc, 4),
+                      round(wacc + 0.005, 4), round(wacc + 0.01, 4)]
+        g_range = [0.02, 0.025, 0.03, 0.035, 0.04]
+        sensitivity = {}
+        for w in wacc_range:
+            for gv in g_range:
+                if w > gv:
+                    tv = projected_fcff[-1] * (1 + gv) / (w - gv)
+                    pv_t = tv / (1 + w) ** 5
+                    pv_cf = sum(fcf / (1 + w) ** t for t, fcf in enumerate(projected_fcff, 1))
+                    ev = pv_cf + pv_t
+                    eq = ev - total_debt + cash
+                    sensitivity[(round(w * 100, 2), round(gv * 100, 2))] = round(eq / shares, 2)
+
+        return {
+            "fcff": fcff,
+            "nopat": nopat,
+            "ebit": ebit,
+            "tax_rate": tax_rate,
+            "da": da,
+            "capex": capex,
+            "wk_change": wk_change,
+            "rev_growth": rev_growth,
+            "projected_fcff": projected_fcff,
+            "wacc": wacc,
+            "terminal_g": g,
+            "terminal_value": terminal_value,
+            "pv_fcff": pv_fcff,
+            "pv_terminal": pv_terminal,
+            "enterprise_value": enterprise_value,
+            "total_debt": total_debt,
+            "cash": cash,
+            "equity_value": equity_value,
+            "shares": shares,
+            "fair_value_per_share": round(fair_value_per_share, 2),
+            "current_price": current_price,
+            "upside_pct": round(upside, 2),
+            "wacc_range": wacc_range,
+            "g_range": g_range,
+            "sensitivity": sensitivity,
+        }
+    except Exception:
+        return {}
+
+
+def compute_capital_returns(ticker: str) -> dict:
+    """Compute ROIC, ROCE, and Shareholder Yield (B3 + B4)."""
+    result = {
+        "roic": None, "roce": None,
+        "nopat": None, "invested_capital": None,
+        "ebit": None, "capital_employed": None,
+        "div_yield": None, "buyback_yield": None,
+        "debt_paydown_yield": None, "shareholder_yield": None,
+    }
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        financials = tk.financials
+        balance = tk.balance_sheet
+        cf = tk.cashflow
+
+        if financials is None or financials.empty or balance is None or balance.empty:
+            return result
+
+        def _get(df, labels):
+            for label in labels:
+                if label in df.index:
+                    v = df.loc[label].iloc[0]
+                    if v is not None and v == v:
+                        return float(v)
+            return None
+
+        # EBIT
+        ebit = _get(financials, ["EBIT", "Operating Income"])
+        total_assets = _get(balance, ["Total Assets"])
+        current_liab = _get(balance, ["Current Liabilities", "Total Current Liabilities"])
+        total_equity = _get(balance, ["Total Stockholders Equity", "Stockholders Equity",
+                                       "Total Equity Gross Minority Interest"])
+        cash = _get(balance, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"])
+        total_debt = _get(balance, ["Total Debt", "Long Term Debt"])
+
+        # Tax rate
+        tax_rate = 0.25
+        try:
+            pretax = _get(financials, ["Pretax Income", "Income Before Tax"])
+            tax_exp = _get(financials, ["Tax Provision", "Income Tax Expense"])
+            if pretax and pretax > 0 and tax_exp is not None:
+                tax_rate = max(0.0, min(abs(tax_exp) / pretax, 0.50))
+        except Exception:
+            pass
+
+        # B3: ROIC = NOPAT / Invested Capital
+        if ebit and total_assets:
+            nopat = ebit * (1 - tax_rate)
+            result["nopat"] = nopat
+            invested_capital = total_assets - (cash or 0) - (current_liab or 0)
+            if invested_capital > 0:
+                result["invested_capital"] = invested_capital
+                result["roic"] = (nopat / invested_capital) * 100
+
+        # B3: ROCE = EBIT / Capital Employed
+        if ebit and total_assets and current_liab:
+            capital_employed = total_assets - current_liab
+            if capital_employed > 0:
+                result["ebit"] = ebit
+                result["capital_employed"] = capital_employed
+                result["roce"] = (ebit / capital_employed) * 100
+
+        # B4: Shareholder Yield
+        market_cap = info.get('marketCap', 0) or 0
+        div_yield = info.get('dividendYield', 0) or 0
+        result["div_yield"] = div_yield * 100
+
+        # Buyback yield: change in shares outstanding YoY
+        buyback_yield = 0.0
+        try:
+            shares_row = None
+            for label in ["Ordinary Shares Number", "Share Issued"]:
+                if label in balance.index:
+                    shares_row = balance.loc[label]
+                    break
+            if shares_row is not None and len(shares_row) >= 2:
+                shares_curr = float(shares_row.iloc[0])
+                shares_prev = float(shares_row.iloc[1])
+                if shares_prev > 0 and shares_curr > 0:
+                    buyback_yield = (shares_prev - shares_curr) / shares_prev * 100
+        except Exception:
+            pass
+        result["buyback_yield"] = buyback_yield
+
+        # Debt paydown yield
+        debt_paydown_yield = 0.0
+        try:
+            debt_row = None
+            for label in ["Total Debt", "Long Term Debt"]:
+                if label in balance.index:
+                    debt_row = balance.loc[label]
+                    break
+            if debt_row is not None and len(debt_row) >= 2 and market_cap > 0:
+                debt_curr = float(debt_row.iloc[0])
+                debt_prev = float(debt_row.iloc[1])
+                debt_paydown_yield = (debt_prev - debt_curr) / market_cap * 100
+        except Exception:
+            pass
+        result["debt_paydown_yield"] = debt_paydown_yield
+
+        result["shareholder_yield"] = (div_yield * 100) + buyback_yield + debt_paydown_yield
+
+    except Exception:
+        pass
+    return result
+
+
+# Sector median multiples for comparison
+SECTOR_MULTIPLES = {
+    "Technology":         {"pe": 25, "fwd_pe": 22, "ps": 6.0, "pb": 8.0, "pfcf": 28, "ev_ebitda": 18, "ev_ebit": 22, "ev_sales": 6.5, "ev_fcf": 30, "peg": 1.5},
+    "Healthcare":         {"pe": 20, "fwd_pe": 18, "ps": 4.0, "pb": 4.0, "pfcf": 22, "ev_ebitda": 14, "ev_ebit": 17, "ev_sales": 4.5, "ev_fcf": 24, "peg": 1.8},
+    "Financial Services": {"pe": 14, "fwd_pe": 12, "ps": 3.0, "pb": 1.5, "pfcf": 12, "ev_ebitda": 10, "ev_ebit": 12, "ev_sales": 3.5, "ev_fcf": 14, "peg": 1.3},
+    "Consumer Cyclical":  {"pe": 20, "fwd_pe": 18, "ps": 2.0, "pb": 4.0, "pfcf": 20, "ev_ebitda": 12, "ev_ebit": 15, "ev_sales": 2.5, "ev_fcf": 22, "peg": 1.5},
+    "Consumer Defensive": {"pe": 22, "fwd_pe": 20, "ps": 2.5, "pb": 5.0, "pfcf": 24, "ev_ebitda": 14, "ev_ebit": 17, "ev_sales": 3.0, "ev_fcf": 26, "peg": 2.0},
+    "Industrials":        {"pe": 18, "fwd_pe": 16, "ps": 2.0, "pb": 3.5, "pfcf": 20, "ev_ebitda": 12, "ev_ebit": 15, "ev_sales": 2.5, "ev_fcf": 22, "peg": 1.5},
+    "Energy":             {"pe": 12, "fwd_pe": 10, "ps": 1.5, "pb": 2.0, "pfcf": 10, "ev_ebitda": 7, "ev_ebit": 9, "ev_sales": 1.5, "ev_fcf": 12, "peg": 1.0},
+    "Basic Materials":    {"pe": 15, "fwd_pe": 13, "ps": 2.0, "pb": 2.5, "pfcf": 14, "ev_ebitda": 10, "ev_ebit": 12, "ev_sales": 2.0, "ev_fcf": 16, "peg": 1.3},
+    "Communication Services": {"pe": 18, "fwd_pe": 16, "ps": 3.0, "pb": 3.0, "pfcf": 18, "ev_ebitda": 10, "ev_ebit": 13, "ev_sales": 3.5, "ev_fcf": 20, "peg": 1.4},
+    "Real Estate":        {"pe": 35, "fwd_pe": 30, "ps": 8.0, "pb": 2.5, "pfcf": 30, "ev_ebitda": 20, "ev_ebit": 25, "ev_sales": 9.0, "ev_fcf": 35, "peg": 2.5},
+    "Utilities":          {"pe": 16, "fwd_pe": 14, "ps": 2.5, "pb": 2.0, "pfcf": 15, "ev_ebitda": 12, "ev_ebit": 14, "ev_sales": 3.0, "ev_fcf": 18, "peg": 2.0},
+}
+
+
+def compute_multiples(ticker: str) -> dict:
+    """Compute expanded valuation multiples with sector comparison (B5)."""
+    result = {"multiples": [], "sector": ""}
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        cf = tk.cashflow
+
+        sector = info.get("sector", "")
+        result["sector"] = sector
+        sector_med = SECTOR_MULTIPLES.get(sector, SECTOR_MULTIPLES.get("Technology", {}))
+
+        price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        market_cap = info.get("marketCap", 0) or 0
+        shares = info.get("sharesOutstanding", 1) or 1
+        ev = info.get("enterpriseValue", 0) or 0
+
+        # EPS values
+        trailing_eps = info.get("trailingEps", 0) or 0
+        forward_eps = info.get("forwardEps", 0) or 0
+        book_value = info.get("bookValue", 0) or 0
+        revenue_ps = info.get("revenuePerShare", 0) or 0
+        ebitda = info.get("ebitda", 0) or 0
+        revenue = info.get("totalRevenue", 0) or 0
+        earnings_growth = info.get("earningsGrowth", 0) or 0
+
+        # FCF from cashflow
+        fcf = 0
+        try:
+            if cf is not None and not cf.empty:
+                ocf = None
+                for label in ["Operating Cash Flow", "Total Cash From Operating Activities",
+                               "Cash Flow From Continuing Operating Activities"]:
+                    if label in cf.index:
+                        ocf = float(cf.loc[label].iloc[0])
+                        break
+                capex = 0
+                for label in ["Capital Expenditure", "Capital Expenditures"]:
+                    if label in cf.index:
+                        capex = abs(float(cf.loc[label].iloc[0]))
+                        break
+                if ocf:
+                    fcf = ocf - capex
+        except Exception:
+            pass
+
+        # EBIT
+        ebit = 0
+        try:
+            financials = tk.financials
+            if financials is not None and not financials.empty:
+                for label in ["EBIT", "Operating Income"]:
+                    if label in financials.index:
+                        ebit = float(financials.loc[label].iloc[0])
+                        break
+        except Exception:
+            pass
+
+        def _signal(val, median, lower_better=False):
+            """Return signal: cheap / fair / expensive."""
+            if val is None or median is None or median == 0:
+                return "fair", "#fbbf24"
+            ratio = val / median
+            if lower_better:
+                if ratio < 0.8:
+                    return "cheap", "#34d399"
+                elif ratio > 1.2:
+                    return "expensive", "#f87171"
+                return "fair", "#fbbf24"
+            else:
+                if ratio < 0.8:
+                    return "cheap", "#34d399"
+                elif ratio > 1.2:
+                    return "expensive", "#f87171"
+                return "fair", "#fbbf24"
+
+        multiples = []
+
+        # P/E
+        pe = price / trailing_eps if trailing_eps > 0 else None
+        sig, col = _signal(pe, sector_med.get("pe"), lower_better=True)
+        multiples.append({"name": "P/E", "value": pe, "sector_median": sector_med.get("pe"), "signal": sig, "color": col})
+
+        # Forward P/E
+        fwd_pe = price / forward_eps if forward_eps > 0 else None
+        sig, col = _signal(fwd_pe, sector_med.get("fwd_pe"), lower_better=True)
+        multiples.append({"name": "Fwd P/E", "value": fwd_pe, "sector_median": sector_med.get("fwd_pe"), "signal": sig, "color": col})
+
+        # P/S
+        ps = price / revenue_ps if revenue_ps > 0 else None
+        sig, col = _signal(ps, sector_med.get("ps"), lower_better=True)
+        multiples.append({"name": "P/S", "value": ps, "sector_median": sector_med.get("ps"), "signal": sig, "color": col})
+
+        # P/B
+        pb = price / book_value if book_value > 0 else None
+        sig, col = _signal(pb, sector_med.get("pb"), lower_better=True)
+        multiples.append({"name": "P/B", "value": pb, "sector_median": sector_med.get("pb"), "signal": sig, "color": col})
+
+        # P/FCF
+        fcf_ps = fcf / shares if shares > 0 else 0
+        pfcf = price / fcf_ps if fcf_ps > 0 else None
+        sig, col = _signal(pfcf, sector_med.get("pfcf"), lower_better=True)
+        multiples.append({"name": "P/FCF", "value": pfcf, "sector_median": sector_med.get("pfcf"), "signal": sig, "color": col})
+
+        # EV/EBITDA
+        ev_ebitda = ev / ebitda if ebitda > 0 else None
+        sig, col = _signal(ev_ebitda, sector_med.get("ev_ebitda"), lower_better=True)
+        multiples.append({"name": "EV/EBITDA", "value": ev_ebitda, "sector_median": sector_med.get("ev_ebitda"), "signal": sig, "color": col})
+
+        # EV/EBIT
+        ev_ebit = ev / ebit if ebit > 0 else None
+        sig, col = _signal(ev_ebit, sector_med.get("ev_ebit"), lower_better=True)
+        multiples.append({"name": "EV/EBIT", "value": ev_ebit, "sector_median": sector_med.get("ev_ebit"), "signal": sig, "color": col})
+
+        # EV/Sales
+        ev_sales = ev / revenue if revenue > 0 else None
+        sig, col = _signal(ev_sales, sector_med.get("ev_sales"), lower_better=True)
+        multiples.append({"name": "EV/Sales", "value": ev_sales, "sector_median": sector_med.get("ev_sales"), "signal": sig, "color": col})
+
+        # EV/FCF
+        ev_fcf = ev / fcf if fcf > 0 else None
+        sig, col = _signal(ev_fcf, sector_med.get("ev_fcf"), lower_better=True)
+        multiples.append({"name": "EV/FCF", "value": ev_fcf, "sector_median": sector_med.get("ev_fcf"), "signal": sig, "color": col})
+
+        # PEG
+        pe_val = pe if pe else 0
+        eg_pct = earnings_growth * 100 if earnings_growth else 0
+        peg = pe_val / eg_pct if eg_pct > 0 and pe_val > 0 else None
+        sig, col = _signal(peg, sector_med.get("peg"), lower_better=True)
+        multiples.append({"name": "PEG", "value": peg, "sector_median": sector_med.get("peg"), "signal": sig, "color": col})
+
+        result["multiples"] = multiples
+    except Exception:
+        pass
+    return result
+
+
 def compute_wacc(ticker: str) -> dict:
     """
     Compute Weighted Average Cost of Capital (WACC).
@@ -677,20 +1074,37 @@ def compute_wacc(ticker: str) -> dict:
         except Exception:
             rf = 0.04
 
-        # Beta
-        beta = info.get("beta", 1.0) or 1.0
+        # Beta — lever the unlevered beta using Hamada equation
+        beta_unlevered = info.get("beta", 1.0) or 1.0
+        market_cap = info.get("marketCap", 0) or 0
+        total_debt = info.get("totalDebt", 0) or 0
+
+        # We need tax_rate early for levered beta; compute it first
+        _tax_rate_for_beta = 0.21
+        try:
+            if financials is not None and not financials.empty:
+                _pretax_b = None
+                _tax_exp_b = None
+                for label in ["Pretax Income", "Income Before Tax"]:
+                    if label in financials.index:
+                        _pretax_b = float(financials.loc[label].iloc[0])
+                        break
+                for label in ["Tax Provision", "Income Tax Expense"]:
+                    if label in financials.index:
+                        _tax_exp_b = abs(float(financials.loc[label].iloc[0]))
+                        break
+                if _pretax_b and _pretax_b > 0 and _tax_exp_b is not None:
+                    _tax_rate_for_beta = max(0, min(_tax_exp_b / _pretax_b, 0.50))
+        except Exception:
+            pass
+
+        beta = beta_unlevered * (1 + (1 - _tax_rate_for_beta) * (total_debt / max(market_cap, 1)))
 
         # Equity Risk Premium (standard)
         erp = 0.055
 
-        # Cost of Equity: Ke = Rf + Beta * ERP
+        # Cost of Equity: Ke = Rf + Beta_levered * ERP
         ke = rf + beta * erp
-
-        # Market Cap (equity value)
-        market_cap = info.get("marketCap", 0) or 0
-
-        # Total Debt
-        total_debt = info.get("totalDebt", 0) or 0
 
         # Cost of Debt: interest expense / total debt
         kd = 0.05  # default
@@ -743,6 +1157,7 @@ def compute_wacc(ticker: str) -> dict:
             "kd": kd,
             "rf": rf,
             "beta": beta,
+            "beta_unlevered": beta_unlevered,
             "erp": erp,
             "tax_rate": tax_rate,
             "we": we,

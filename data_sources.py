@@ -8,6 +8,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 try:
+    import streamlit as st
+except ImportError:
+    st = None
+
+try:
     import yfinance as yf
 except ImportError:
     yf = None
@@ -182,3 +187,63 @@ def get_aggregator():
     if _aggregator is None:
         _aggregator = DataAggregator()
     return _aggregator
+
+
+# ── Cached standalone wrapper functions (st.cache_data doesn't work on methods) ──
+if st is not None:
+    @st.cache_data(ttl=300)
+    def cached_fear_greed_index():
+        """Cached Fear & Greed Index (5 min TTL)."""
+        try:
+            return get_aggregator().get_fear_greed_index()
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=300)
+    def cached_crypto_overview():
+        """Cached Crypto Overview (5 min TTL)."""
+        try:
+            return get_aggregator().get_crypto_overview()
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=300)
+    def cached_vix():
+        """Cached VIX level (5 min TTL)."""
+        try:
+            return get_aggregator().get_vix()
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=300)
+    def cached_spy_put_call_ratio():
+        """Cached SPY Put/Call Ratio (5 min TTL)."""
+        try:
+            return get_aggregator().get_spy_put_call_ratio()
+        except Exception:
+            return None
+else:
+    # Fallback without caching if streamlit not available
+    def cached_fear_greed_index():
+        try:
+            return get_aggregator().get_fear_greed_index()
+        except Exception:
+            return None
+
+    def cached_crypto_overview():
+        try:
+            return get_aggregator().get_crypto_overview()
+        except Exception:
+            return None
+
+    def cached_vix():
+        try:
+            return get_aggregator().get_vix()
+        except Exception:
+            return None
+
+    def cached_spy_put_call_ratio():
+        try:
+            return get_aggregator().get_spy_put_call_ratio()
+        except Exception:
+            return None

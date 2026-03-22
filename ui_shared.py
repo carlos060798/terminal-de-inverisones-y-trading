@@ -4,6 +4,11 @@ Dark theme constants, formatters, KPI card builders.
 """
 import pandas as pd
 
+# Standard chart height constants
+CHART_SM = 250
+CHART_MD = 320
+CHART_LG = 400
+
 DARK = dict(
     paper_bgcolor="#000000",
     plot_bgcolor="#0a0a0a",

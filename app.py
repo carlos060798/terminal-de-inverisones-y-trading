@@ -576,6 +576,30 @@ with _hdr2:
                                 label_visibility="collapsed")
     if _ticker_in.strip() and _ticker_in.strip().upper() != st.session_state.get("active_ticker", ""):
         st.session_state.active_ticker = _ticker_in.strip().upper()
+        # F3: Search History — track recent searches
+        try:
+            if "search_history" not in st.session_state:
+                st.session_state.search_history = []
+            _new_ticker = _ticker_in.strip().upper()
+            if _new_ticker in st.session_state.search_history:
+                st.session_state.search_history.remove(_new_ticker)
+            st.session_state.search_history.insert(0, _new_ticker)
+            st.session_state.search_history = st.session_state.search_history[:10]
+        except Exception:
+            pass
+
+    # F3: Display search history as clickable buttons
+    try:
+        if st.session_state.get('search_history'):
+            st.caption("Recientes:")
+            cols = st.columns(min(len(st.session_state.search_history), 5))
+            for i, t in enumerate(st.session_state.search_history[:5]):
+                with cols[i]:
+                    if st.button(t, key=f"hist_{t}"):
+                        st.session_state.active_ticker = t
+                        st.rerun()
+    except Exception:
+        pass
 
 # ── ANT DESIGN NAVIGATION ─────────────────────────────────────────────────────
 _active = sac.tabs([

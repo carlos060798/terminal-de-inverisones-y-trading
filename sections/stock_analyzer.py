@@ -13,6 +13,7 @@ import report_generator
 import translator
 import excel_export
 import ai_engine
+import ml_engine
 from ui_shared import DARK, dark_layout, IDEAL, score, fmt, kpi
 
 try:
@@ -1107,6 +1108,476 @@ def render():
         except Exception:
             pass
 
+        # ── G2: 52-Week Range Bar ──
+        try:
+            _tk_g2 = yf.Ticker(ticker_solo)
+            _info_g2 = _tk_g2.info
+            _price_g2 = _info_g2.get("currentPrice") or _info_g2.get("regularMarketPrice") or 0
+            _low52_g2 = _info_g2.get("fiftyTwoWeekLow") or 0
+            _high52_g2 = _info_g2.get("fiftyTwoWeekHigh") or 0
+            if _price_g2 > 0 and _high52_g2 > _low52_g2:
+                _pct_g2 = ((_price_g2 - _low52_g2) / (_high52_g2 - _low52_g2)) * 100
+                _pct_g2 = max(0, min(100, _pct_g2))
+                _bar_color_g2 = "#34d399" if _pct_g2 > 60 else ("#fbbf24" if _pct_g2 > 30 else "#f87171")
+                st.markdown(f"""
+                <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:16px 20px;margin-bottom:16px;'>
+                  <div style='display:flex;justify-content:space-between;margin-bottom:8px;'>
+                    <span style='color:#5a6f8a;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;'>52-Week Range</span>
+                    <span style='color:#f0f6ff;font-size:13px;font-weight:600;'>${_price_g2:,.2f} ({_pct_g2:.0f}%)</span>
+                  </div>
+                  <div style='display:flex;align-items:center;gap:10px;'>
+                    <span style='color:#f87171;font-size:12px;font-weight:600;'>${_low52_g2:,.2f}</span>
+                    <div style='flex:1;background:#1a1a1a;border-radius:6px;height:12px;overflow:hidden;position:relative;'>
+                      <div style='background:linear-gradient(90deg, #f87171, #fbbf24, #34d399);width:100%;height:100%;opacity:0.2;'></div>
+                      <div style='position:absolute;top:0;left:0;background:{_bar_color_g2};width:{_pct_g2}%;height:100%;border-radius:6px;
+                                  transition:width 0.5s ease;'></div>
+                      <div style='position:absolute;top:-2px;left:{_pct_g2}%;width:4px;height:16px;background:#f0f6ff;border-radius:2px;
+                                  margin-left:-2px;'></div>
+                    </div>
+                    <span style='color:#34d399;font-size:12px;font-weight:600;'>${_high52_g2:,.2f}</span>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        # ── G4: Short Interest ──
+        try:
+            _info_g4 = yf.Ticker(ticker_solo).info
+            _short_pct = _info_g4.get("shortPercentOfFloat")
+            _short_ratio = _info_g4.get("shortRatio")
+            if _short_pct is not None:
+                _short_pct_val = _short_pct * 100 if _short_pct < 1 else _short_pct
+                _short_color = "red" if _short_pct_val > 20 else ("yellow" if _short_pct_val > 10 else "green")
+                _short_sub = f"Short Ratio: {_short_ratio:.1f} days" if _short_ratio else ""
+                st.markdown(kpi("Short Interest", f"{_short_pct_val:.1f}%", _short_sub, _short_color), unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        # ── G8: Price vs Moving Averages Signal ──
+        with st.expander("📊 Señales Medias Móviles", expanded=False):
+            try:
+                _hist_g8 = yf.Ticker(ticker_solo).history(period="1y")
+                if _hist_g8 is not None and len(_hist_g8) > 0:
+                    _price_g8 = _hist_g8["Close"].iloc[-1]
+                    _ma20_g8 = _hist_g8["Close"].rolling(20).mean().iloc[-1] if len(_hist_g8) >= 20 else None
+                    _ma50_g8 = _hist_g8["Close"].rolling(50).mean().iloc[-1] if len(_hist_g8) >= 50 else None
+                    _ma200_g8 = _hist_g8["Close"].rolling(200).mean().iloc[-1] if len(_hist_g8) >= 200 else None
+
+                    _ma_rows = []
+                    _bullish_count = 0
+                    _total_count = 0
+                    for _ma_label, _ma_val in [("MA 20", _ma20_g8), ("MA 50", _ma50_g8), ("MA 200", _ma200_g8)]:
+                        if _ma_val is not None:
+                            _total_count += 1
+                            _above = _price_g8 >= _ma_val
+                            if _above:
+                                _bullish_count += 1
+                            _icon = "✅" if _above else "❌"
+                            _signal_txt = "ALCISTA" if _above else "BAJISTA"
+                            _clr = "#34d399" if _above else "#f87171"
+                            _diff_pct = ((_price_g8 - _ma_val) / _ma_val) * 100
+                            _ma_rows.append(f"""
+                            <tr>
+                              <td style='padding:8px 12px;color:#f0f6ff;font-weight:600;'>{_ma_label}</td>
+                              <td style='padding:8px 12px;color:#94a3b8;'>${_ma_val:,.2f}</td>
+                              <td style='padding:8px 12px;color:{_clr};font-weight:600;'>{_diff_pct:+.2f}%</td>
+                              <td style='padding:8px 12px;'>{_icon} <span style='color:{_clr};font-weight:600;'>{_signal_txt}</span></td>
+                            </tr>""")
+
+                    if _ma_rows:
+                        # Summary badge
+                        if _total_count > 0:
+                            if _bullish_count == _total_count:
+                                _summary_lbl = f"{_bullish_count}/{_total_count} BULLISH"
+                                _summary_clr = "#34d399"
+                                _summary_bg = "#064e3b"
+                            elif _bullish_count == 0:
+                                _summary_lbl = f"0/{_total_count} BEARISH"
+                                _summary_clr = "#f87171"
+                                _summary_bg = "#451a03"
+                            else:
+                                _summary_lbl = f"{_bullish_count}/{_total_count} MIXTO"
+                                _summary_clr = "#fbbf24"
+                                _summary_bg = "#422006"
+
+                            st.markdown(f"""
+                            <div style='text-align:center;margin-bottom:12px;'>
+                              <span style='background:{_summary_bg};border:1px solid {_summary_clr};
+                                          border-radius:8px;padding:6px 16px;color:{_summary_clr};
+                                          font-weight:700;font-size:14px;'>{_summary_lbl}</span>
+                              <span style='color:#5a6f8a;font-size:12px;margin-left:12px;'>
+                                Precio actual: ${_price_g8:,.2f}</span>
+                            </div>""", unsafe_allow_html=True)
+
+                        _table_html = """
+                        <table style='width:100%;border-collapse:collapse;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:10px;'>
+                          <thead>
+                            <tr style='border-bottom:1px solid #1a1a1a;'>
+                              <th style='padding:8px 12px;text-align:left;color:#5a6f8a;font-size:11px;text-transform:uppercase;letter-spacing:1px;'>Media Móvil</th>
+                              <th style='padding:8px 12px;text-align:left;color:#5a6f8a;font-size:11px;text-transform:uppercase;letter-spacing:1px;'>Valor</th>
+                              <th style='padding:8px 12px;text-align:left;color:#5a6f8a;font-size:11px;text-transform:uppercase;letter-spacing:1px;'>Precio vs MA</th>
+                              <th style='padding:8px 12px;text-align:left;color:#5a6f8a;font-size:11px;text-transform:uppercase;letter-spacing:1px;'>Señal</th>
+                            </tr>
+                          </thead>
+                          <tbody>""" + "".join(_ma_rows) + """
+                          </tbody>
+                        </table>"""
+                        st.markdown(_table_html, unsafe_allow_html=True)
+                    else:
+                        st.info("No hay suficientes datos para calcular medias móviles.")
+                else:
+                    st.info("No se pudieron obtener datos históricos.")
+            except Exception as _e_g8:
+                st.warning(f"Error calculando señales de medias móviles: {_e_g8}")
+
+        # ── G10: Relative Strength vs S&P 500 ──
+        try:
+            _hist_g10 = yf.download(ticker_solo, period="3mo", progress=False)
+            _spy_g10 = yf.download("SPY", period="3mo", progress=False)
+            if _hist_g10 is not None and not _hist_g10.empty and _spy_g10 is not None and not _spy_g10.empty:
+                if isinstance(_hist_g10.columns, pd.MultiIndex):
+                    _tk_close_g10 = _hist_g10["Close"].iloc[:, 0]
+                else:
+                    _tk_close_g10 = _hist_g10["Close"]
+                if isinstance(_spy_g10.columns, pd.MultiIndex):
+                    _spy_close_g10 = _spy_g10["Close"].iloc[:, 0]
+                else:
+                    _spy_close_g10 = _spy_g10["Close"]
+                _tk_ret_g10 = (_tk_close_g10.iloc[-1] / _tk_close_g10.iloc[0] - 1) * 100
+                _spy_ret_g10 = (_spy_close_g10.iloc[-1] / _spy_close_g10.iloc[0] - 1) * 100
+                # Ratio: RS = ticker_return / spy_return (handle zero)
+                if abs(_spy_ret_g10) > 0.001:
+                    _rs_ratio = (1 + _tk_ret_g10 / 100) / (1 + _spy_ret_g10 / 100)
+                else:
+                    _rs_ratio = 1.0
+                _rs_label = "Outperforming" if _rs_ratio > 1 else "Underperforming"
+                _rs_color = "green" if _rs_ratio > 1 else "red"
+                st.markdown(kpi("RS vs S&P", f"{_rs_ratio:.2f}x ({_rs_label})",
+                               f"{ticker_solo}: {_tk_ret_g10:+.1f}% | SPY: {_spy_ret_g10:+.1f}% (3M)", _rs_color),
+                           unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        # ── G3: Earnings Surprise ──
+        with st.expander("📊 Earnings Surprise (Ultimos 4 Trimestres)", expanded=False):
+            try:
+                _tk_g3 = yf.Ticker(ticker_solo)
+                _eh_g3 = getattr(_tk_g3, 'earnings_history', None)
+                if _eh_g3 is None:
+                    _eh_g3 = getattr(_tk_g3, 'quarterly_earnings', None)
+                if _eh_g3 is not None and not _eh_g3.empty:
+                    _eh_display = _eh_g3.head(4).copy()
+                    st.dataframe(_eh_display, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay datos de earnings surprise disponibles.")
+            except Exception as _e_g3:
+                st.info(f"No se pudieron cargar earnings surprise: {_e_g3}")
+
+        # ── G7: Dividend Safety Score (Enhanced) ──
+        with st.expander("🛡 Dividend Safety Score", expanded=False):
+            try:
+                _tk_g7 = yf.Ticker(ticker_solo)
+                _info_g7 = _tk_g7.info
+                _div_yield_g7 = (_info_g7.get("dividendYield") or 0) * 100
+                _payout_g7 = _info_g7.get("payoutRatio") or 0
+                _payout_pct = _payout_g7 * 100 if _payout_g7 < 2 else _payout_g7
+                _fcf_ps = _info_g7.get("freeCashflow") or 0
+                _div_rate = _info_g7.get("dividendRate") or 0
+                _shares_out = _info_g7.get("sharesOutstanding") or 1
+                _total_div = _div_rate * _shares_out
+                _fcf_payout = (_total_div / _fcf_ps * 100) if _fcf_ps > 0 else 999
+                _debt_equity = _info_g7.get("debtToEquity") or 0
+                _debt_equity_ratio = _debt_equity / 100 if _debt_equity > 5 else _debt_equity
+
+                # Consecutive years of dividends
+                try:
+                    _divs_g7 = _tk_g7.dividends
+                    if _divs_g7 is not None and len(_divs_g7) > 0:
+                        _div_years = len(_divs_g7.resample('YE').sum().loc[lambda x: x > 0])
+                    else:
+                        _div_years = 0
+                except Exception:
+                    _div_years = 0
+
+                # Score (0-100) based on 4 criteria
+                _div_score = 0
+                _breakdown = []
+
+                # 1) Payout Ratio (max 30pts)
+                if _payout_pct > 0 and _payout_pct < 60:
+                    _pr_pts = 30
+                elif _payout_pct > 0 and _payout_pct < 80:
+                    _pr_pts = 20
+                else:
+                    _pr_pts = 0
+                _div_score += _pr_pts
+                _breakdown.append(("Payout Ratio", f"{_payout_pct:.1f}%", "< 60%", f"{_pr_pts}/30"))
+
+                # 2) FCF Payout (max 25pts)
+                if _fcf_payout < 70:
+                    _fcf_pts = 25
+                elif _fcf_payout < 90:
+                    _fcf_pts = 15
+                else:
+                    _fcf_pts = 0
+                _div_score += _fcf_pts
+                _breakdown.append(("FCF Payout", f"{_fcf_payout:.1f}%", "< 70%", f"{_fcf_pts}/25"))
+
+                # 3) Consecutive years of dividends (max 25pts)
+                if _div_years > 10:
+                    _yr_pts = 25
+                elif _div_years > 5:
+                    _yr_pts = 15
+                else:
+                    _yr_pts = 5
+                _div_score += _yr_pts
+                _breakdown.append(("Anos Dividendos", f"{_div_years}y", "> 10y", f"{_yr_pts}/25"))
+
+                # 4) Debt/Equity (max 20pts)
+                if _debt_equity_ratio < 1:
+                    _de_pts = 20
+                elif _debt_equity_ratio < 2:
+                    _de_pts = 10
+                else:
+                    _de_pts = 0
+                _div_score += _de_pts
+                _breakdown.append(("Debt/Equity", f"{_debt_equity_ratio:.2f}", "< 1.0", f"{_de_pts}/20"))
+
+                if _div_yield_g7 > 0:
+                    _ds_color = "#34d399" if _div_score >= 70 else ("#fbbf24" if _div_score >= 40 else "#f87171")
+                    _ds_label = "SEGURO" if _div_score >= 70 else ("MODERADO" if _div_score >= 40 else "EN RIESGO")
+                    _ds_bg = "rgba(52,211,153,0.1)" if _div_score >= 70 else ("rgba(251,191,36,0.1)" if _div_score >= 40 else "rgba(248,113,113,0.1)")
+
+                    # Score badge
+                    st.markdown(f"""
+                    <div style='text-align:center;margin-bottom:16px;'>
+                      <span style='background:{_ds_bg};border:2px solid {_ds_color};border-radius:50%;
+                                   display:inline-block;width:80px;height:80px;line-height:80px;
+                                   font-size:28px;font-weight:800;color:{_ds_color};'>{_div_score}</span>
+                      <div style='color:{_ds_color};font-size:14px;font-weight:700;margin-top:8px;'>{_ds_label}</div>
+                    </div>""", unsafe_allow_html=True)
+
+                    _dk1, _dk2, _dk3, _dk4 = st.columns(4)
+                    _dk1.markdown(kpi("Dividend Safety", f"{_div_score}/100", _ds_label,
+                                      "green" if _div_score >= 70 else ("yellow" if _div_score >= 40 else "red")),
+                                 unsafe_allow_html=True)
+                    _dk2.markdown(kpi("Div Yield", f"{_div_yield_g7:.2f}%", "", "green"), unsafe_allow_html=True)
+                    _dk3.markdown(kpi("Payout Ratio", f"{_payout_pct:.1f}%", "< 60% ideal",
+                                      "green" if _payout_pct < 60 else "red"), unsafe_allow_html=True)
+                    _dk4.markdown(kpi("Debt/Equity", f"{_debt_equity_ratio:.2f}", "< 1.0 ideal",
+                                      "green" if _debt_equity_ratio < 1 else "red"), unsafe_allow_html=True)
+
+                    # Breakdown table
+                    _tbl_html = """<table style='width:100%;border-collapse:collapse;margin-top:12px;'>
+                        <tr style='border-bottom:1px solid #1a1a1a;'>
+                            <th style='padding:8px;color:#5a6f8a;text-align:left;font-size:11px;'>CRITERIO</th>
+                            <th style='padding:8px;color:#5a6f8a;text-align:center;font-size:11px;'>VALOR</th>
+                            <th style='padding:8px;color:#5a6f8a;text-align:center;font-size:11px;'>IDEAL</th>
+                            <th style='padding:8px;color:#5a6f8a;text-align:center;font-size:11px;'>PUNTOS</th>
+                        </tr>"""
+                    for _cr, _val, _ideal, _pts in _breakdown:
+                        _tbl_html += f"""<tr style='border-bottom:1px solid #111;'>
+                            <td style='padding:8px;color:#c8d6e5;font-size:12px;'>{_cr}</td>
+                            <td style='padding:8px;color:#f0f6ff;text-align:center;font-size:12px;font-weight:600;'>{_val}</td>
+                            <td style='padding:8px;color:#5a6f8a;text-align:center;font-size:12px;'>{_ideal}</td>
+                            <td style='padding:8px;color:#94a3b8;text-align:center;font-size:12px;font-weight:600;'>{_pts}</td>
+                        </tr>"""
+                    _tbl_html += "</table>"
+                    st.markdown(_tbl_html, unsafe_allow_html=True)
+                else:
+                    st.info("Esta empresa no paga dividendos actualmente.")
+            except Exception as _e_g7:
+                st.info(f"No se pudo calcular dividend safety: {_e_g7}")
+
+        # ── J2: DCA Simulator ──
+        with st.expander("💰 Simulador DCA (Dollar Cost Averaging)", expanded=False):
+            try:
+                _dca_c1, _dca_c2, _dca_c3 = st.columns(3)
+                _dca_amount = _dca_c1.number_input("Aporte mensual ($)", min_value=10.0, value=500.0, step=50.0, key="dca_amount")
+                _dca_years = _dca_c2.number_input("Anos", min_value=1, max_value=20, value=5, key="dca_years")
+                _dca_ticker = _dca_c3.text_input("Ticker", value=ticker_solo, key="dca_ticker")
+
+                if st.button("Simular DCA", key="dca_run"):
+                    with st.spinner("Simulando DCA..."):
+                        _dca_hist = yf.download(_dca_ticker.strip().upper(), period=f"{_dca_years}y", interval="1mo", progress=False)
+                        if _dca_hist is not None and len(_dca_hist) > 2:
+                            if isinstance(_dca_hist.columns, pd.MultiIndex):
+                                _dca_prices = _dca_hist["Close"].iloc[:, 0]
+                            else:
+                                _dca_prices = _dca_hist["Close"]
+
+                            # DCA simulation
+                            _dca_shares_total = 0.0
+                            _dca_invested = 0.0
+                            _dca_values = []
+                            _dca_invested_vals = []
+                            _dca_dates = []
+                            for _idx, _p in enumerate(_dca_prices):
+                                if _p > 0:
+                                    _dca_shares_total += _dca_amount / _p
+                                    _dca_invested += _dca_amount
+                                    _dca_values.append(_dca_shares_total * _p)
+                                    _dca_invested_vals.append(_dca_invested)
+                                    _dca_dates.append(_dca_prices.index[_idx])
+
+                            # Lump sum comparison
+                            _lump_shares = (_dca_amount * len(_dca_prices)) / _dca_prices.iloc[0] if _dca_prices.iloc[0] > 0 else 0
+                            _lump_values = [_lump_shares * _p for _p in _dca_prices]
+
+                            _dca_final = _dca_values[-1] if _dca_values else 0
+                            _lump_final = _lump_values[-1] if _lump_values else 0
+                            _lump_invested = _dca_amount * len(_dca_prices)
+                            _dca_return = ((_dca_final / _dca_invested - 1) * 100) if _dca_invested > 0 else 0
+                            _lump_return = ((_lump_final / _lump_invested - 1) * 100) if _lump_invested > 0 else 0
+
+                            _dk1, _dk2, _dk3, _dk4, _dk5 = st.columns(5)
+                            _dk1.markdown(kpi("Total Invertido", f"${_dca_invested:,.0f}", f"{len(_dca_values)} aportes", "blue"),
+                                         unsafe_allow_html=True)
+                            _dk2.markdown(kpi("Valor DCA", f"${_dca_final:,.0f}", f"{ticker_solo}",
+                                              "green" if _dca_return > 0 else "red"), unsafe_allow_html=True)
+                            _dk3.markdown(kpi("DCA Retorno", f"{_dca_return:+.1f}%", "Dollar Cost Avg",
+                                              "green" if _dca_return > 0 else "red"), unsafe_allow_html=True)
+                            _dk4.markdown(kpi("Valor Lump Sum", f"${_lump_final:,.0f}", "Inversion unica", "purple"),
+                                         unsafe_allow_html=True)
+                            _dk5.markdown(kpi("Lump Sum Retorno", f"{_lump_return:+.1f}%", "Todo el dia 1",
+                                              "green" if _lump_return > 0 else "red"), unsafe_allow_html=True)
+
+                            # Chart
+                            _fig_dca = go.Figure()
+                            _fig_dca.add_trace(go.Scatter(x=_dca_dates, y=_dca_values, mode="lines",
+                                                          name="DCA", line=dict(color="#60a5fa", width=2)))
+                            _fig_dca.add_trace(go.Scatter(x=_dca_dates, y=_dca_invested_vals, mode="lines",
+                                                          name="Invertido", line=dict(color="#5a6f8a", width=1.5, dash="dot")))
+                            _fig_dca.add_trace(go.Scatter(x=list(_dca_prices.index), y=_lump_values, mode="lines",
+                                                          name="Lump Sum", line=dict(color="#a78bfa", width=1.5)))
+                            _fig_dca.update_layout(**DARK, height=350,
+                                title=dict(text=f"DCA vs Lump Sum — {_dca_ticker.upper()}", font=dict(color="#94a3b8", size=13), x=0.5),
+                                legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"),
+                                yaxis_title="Valor ($)")
+                            st.plotly_chart(_fig_dca, use_container_width=True)
+                        else:
+                            st.warning("No hay suficientes datos historicos para simular.")
+            except Exception as _e_dca:
+                st.warning(f"Error en simulador DCA: {_e_dca}")
+
+        # ── ML Analysis (Machine Learning) ──
+        with st.expander("🧠 Analisis ML (Machine Learning)", expanded=False):
+            try:
+                if not ml_engine.HAS_SKLEARN:
+                    st.info("Instala scikit-learn para usar el motor ML: pip install scikit-learn")
+                else:
+                    _quality_ml, _anomaly_ml, _scorer_ml = ml_engine.get_models()
+                    if _quality_ml is not None and not _quality_ml.trained:
+                        st.info("Los modelos ML no estan entrenados. Haz clic en el boton para entrenarlos.")
+                        if st.button("🚀 Entrenar Modelos ML", key="ml_train"):
+                            _prog = st.progress(0, text="Entrenando modelos ML...")
+                            def _ml_progress(p):
+                                _prog.progress(min(p, 1.0), text=f"Recolectando datos... {p*100:.0f}%")
+                            _ok = ml_engine.train_models(progress_callback=_ml_progress)
+                            _prog.empty()
+                            if _ok:
+                                st.success("Modelos ML entrenados exitosamente.")
+                                st.rerun()
+                            else:
+                                st.error("Error entrenando modelos. Verifica conexion a internet.")
+                    elif _quality_ml is not None and _quality_ml.trained:
+                        with st.spinner("Analizando con ML..."):
+                            _ml_result = ml_engine.analyze_ticker(ticker_solo)
+                        if _ml_result:
+                            # Quality classification badge
+                            _ql = _ml_result['quality_label']
+                            _qc = _ml_result['quality_confidence']
+                            _badge_colors = {"EXCELENTE": "#34d399", "BUENA": "#60a5fa", "REGULAR": "#fbbf24", "DEBIL": "#f87171"}
+                            _badge_bg = {"EXCELENTE": "#064e3b", "BUENA": "#0d1f35", "REGULAR": "#422006", "DEBIL": "#451a03"}
+                            _bc = _badge_colors.get(_ql, "#94a3b8")
+                            _bg = _badge_bg.get(_ql, "#0a0a0a")
+
+                            _ml1, _ml2 = st.columns(2)
+                            with _ml1:
+                                st.markdown(f"""
+                                <div style='background:{_bg};border:2px solid {_bc};border-radius:14px;padding:20px;text-align:center;'>
+                                  <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;'>Clasificacion ML</div>
+                                  <div style='font-size:28px;font-weight:800;color:{_bc};margin:8px 0;'>{_ql}</div>
+                                  <div style='font-size:13px;color:#64748b;'>Confianza: {_qc}%</div>
+                                </div>""", unsafe_allow_html=True)
+                            with _ml2:
+                                # Smart Score gauge
+                                _ss = _ml_result['smart_score']
+                                _ss_color = "#34d399" if _ss >= 65 else ("#fbbf24" if _ss >= 40 else "#f87171")
+                                _fig_ss = go.Figure(go.Indicator(
+                                    mode="gauge+number",
+                                    value=_ss,
+                                    number=dict(suffix="/100", font=dict(color="#f0f6ff", size=28)),
+                                    title=dict(text="Smart Score ML", font=dict(color="#94a3b8", size=14)),
+                                    gauge=dict(
+                                        axis=dict(range=[0, 100], tickcolor="#475569",
+                                                  tickfont=dict(color="#475569", size=10)),
+                                        bar=dict(color=_ss_color, thickness=0.7),
+                                        bgcolor="#0a0a0a", bordercolor="#1a1a1a",
+                                        steps=[
+                                            dict(range=[0, 40], color="rgba(248,113,113,0.1)"),
+                                            dict(range=[40, 65], color="rgba(251,191,36,0.1)"),
+                                            dict(range=[65, 100], color="rgba(52,211,153,0.1)"),
+                                        ],
+                                    )
+                                ))
+                                _fig_ss.update_layout(**dark_layout(height=250, margin=dict(l=20, r=20, t=50, b=10)))
+                                st.plotly_chart(_fig_ss, use_container_width=True)
+
+                            # Anomalies table
+                            _anomalies = _ml_result.get('anomalies', [])
+                            if _anomalies:
+                                st.markdown("<div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin:16px 0 8px;'>Anomalias Detectadas</div>", unsafe_allow_html=True)
+                                for _a in _anomalies:
+                                    _az = _a['z_score']
+                                    _ac = "#f87171" if _az > 2.5 else "#fbbf24"
+                                    st.markdown(f"""
+                                    <div style='background:#0a0a0a;border-left:3px solid {_ac};border-radius:0 8px 8px 0;
+                                                padding:8px 14px;margin-bottom:6px;display:flex;justify-content:space-between;'>
+                                      <span style='color:#94a3b8;font-size:12px;'>⚠️ <b>{_a['metric']}</b> — {_a['direction']} del promedio</span>
+                                      <span style='color:{_ac};font-size:12px;font-weight:600;'>Z-Score: {_az} | Valor: {_a['value']:.4f}</span>
+                                    </div>""", unsafe_allow_html=True)
+
+                            # Feature importance bar chart
+                            _fi = _ml_result.get('feature_importance', {})
+                            if _fi:
+                                _fi_sorted = dict(sorted(_fi.items(), key=lambda x: x[1], reverse=True))
+                                _fig_fi = go.Figure(go.Bar(
+                                    x=list(_fi_sorted.values()), y=list(_fi_sorted.keys()),
+                                    orientation='h', marker_color="#60a5fa",
+                                    text=[f"{v:.3f}" for v in _fi_sorted.values()],
+                                    textposition="outside", textfont=dict(color="#94a3b8", size=10),
+                                ))
+                                _fig_fi.update_layout(**DARK, height=350,
+                                    title=dict(text="Importancia de Factores (ML)", font=dict(color="#94a3b8", size=13), x=0.5),
+                                    showlegend=False, yaxis=dict(autorange="reversed"),
+                                    margin=dict(l=100, r=40, t=40, b=20))
+                                st.plotly_chart(_fig_fi, use_container_width=True)
+                        else:
+                            st.info("No se pudo analizar este ticker con ML.")
+
+                        # Retrain button
+                        if st.button("🔄 Re-entrenar Modelos ML", key="ml_retrain"):
+                            try:
+                                import shutil
+                                _cache = ml_engine.MODEL_DIR / "training_data.pkl"
+                                if _cache.exists():
+                                    _cache.unlink()
+                            except Exception:
+                                pass
+                            _prog2 = st.progress(0, text="Re-entrenando...")
+                            def _ml_prog2(p):
+                                _prog2.progress(min(p, 1.0), text=f"Recolectando datos... {p*100:.0f}%")
+                            _ok2 = ml_engine.train_models(progress_callback=_ml_prog2)
+                            _prog2.empty()
+                            if _ok2:
+                                st.success("Modelos re-entrenados.")
+                                st.rerun()
+                            else:
+                                st.error("Error re-entrenando modelos.")
+            except Exception as _e_ml:
+                st.warning(f"Error en analisis ML: {_e_ml}")
+
         # ── Institutional News (Timeline) ──
         with st.expander("📰 Noticias Institucionales", expanded=False):
             try:
@@ -1653,6 +2124,356 @@ def render():
             pass  # data_sources module not available
         except Exception:
             pass  # graceful degradation
+
+        # ── B6: Sensitivity Table DCF ──
+        with st.expander("📊 Tabla de Sensibilidad DCF", expanded=False):
+            try:
+                if st.button("Calcular Sensibilidad", key="btn_sensitivity_dcf"):
+                    with st.spinner("Calculando DCF profesional y tabla de sensibilidad…"):
+                        _dcf_pro = valuation.compute_dcf_professional(ticker_solo)
+                    if _dcf_pro and _dcf_pro.get("sensitivity"):
+                        _sens = _dcf_pro["sensitivity"]
+                        _wacc_vals = _dcf_pro.get("wacc_range", [])
+                        _g_vals = _dcf_pro.get("g_range", [])
+                        _base_fv = _dcf_pro.get("fair_value_per_share", 0)
+                        _curr_price_b6 = _dcf_pro.get("current_price", 0)
+                        _base_wacc = _dcf_pro.get("wacc", 0.10)
+                        _base_g = _dcf_pro.get("terminal_g", 0.03)
+
+                        st.markdown(f"""
+                        <div style='text-align:center;margin-bottom:12px;'>
+                          <span style='color:#60a5fa;font-size:14px;font-weight:600;'>
+                            Fair Value Base: ${_base_fv:,.2f}</span>
+                          <span style='color:#5a6f8a;font-size:12px;margin-left:16px;'>
+                            WACC: {_base_wacc*100:.2f}% · g: {_base_g*100:.1f}%</span>
+                          <span style='color:#fbbf24;font-size:12px;margin-left:16px;'>
+                            Precio Actual: ${_curr_price_b6:,.2f}</span>
+                        </div>""", unsafe_allow_html=True)
+
+                        # Build 5x5 grid for heatmap
+                        _wacc_pcts = [round(w * 100, 2) for w in _wacc_vals]
+                        _g_pcts = [round(g * 100, 2) for g in _g_vals]
+                        _z_matrix = []
+                        _text_matrix = []
+                        for _w_pct in _wacc_pcts:
+                            _row_z = []
+                            _row_txt = []
+                            for _g_pct in _g_pcts:
+                                _val = _sens.get((_w_pct, _g_pct))
+                                if _val is not None:
+                                    _row_z.append(_val)
+                                    _row_txt.append(f"${_val:,.2f}")
+                                else:
+                                    _row_z.append(0)
+                                    _row_txt.append("N/A")
+                            _z_matrix.append(_row_z)
+                            _text_matrix.append(_row_txt)
+
+                        # Custom colorscale: green if above price, red if below
+                        _custom_cs = [[0, "#f87171"], [0.5, "#fbbf24"], [1, "#34d399"]]
+                        if _curr_price_b6 > 0:
+                            _all_vals = [v for row in _z_matrix for v in row if v > 0]
+                            if _all_vals:
+                                _vmin = min(_all_vals)
+                                _vmax = max(_all_vals)
+                                if _vmax > _vmin:
+                                    _mid = (_curr_price_b6 - _vmin) / (_vmax - _vmin)
+                                    _mid = max(0.01, min(0.99, _mid))
+                                    _custom_cs = [
+                                        [0, "#f87171"],
+                                        [_mid, "#fbbf24"],
+                                        [1, "#34d399"],
+                                    ]
+
+                        _fig_sens = go.Figure(data=go.Heatmap(
+                            z=_z_matrix,
+                            x=[f"g={g}%" for g in _g_pcts],
+                            y=[f"WACC={w}%" for w in _wacc_pcts],
+                            text=_text_matrix,
+                            texttemplate="%{text}",
+                            textfont=dict(size=11, color="#f0f6ff"),
+                            colorscale=_custom_cs,
+                            hoverongaps=False,
+                            showscale=True,
+                            colorbar=dict(
+                                title="Fair Value",
+                                titlefont=dict(color="#94a3b8"),
+                                tickfont=dict(color="#94a3b8"),
+                            ),
+                        ))
+                        _fig_sens.update_layout(
+                            **dark_layout(
+                                height=400,
+                                title=dict(text="Sensibilidad DCF: WACC vs Tasa de Crecimiento Terminal",
+                                           font=dict(color="#94a3b8", size=14), x=0.5),
+                                xaxis=dict(title="Crecimiento Terminal (g)", side="bottom",
+                                           tickfont=dict(color="#94a3b8")),
+                                yaxis=dict(title="WACC", tickfont=dict(color="#94a3b8")),
+                            ),
+                        )
+                        if _curr_price_b6 > 0:
+                            _fig_sens.add_annotation(
+                                text=f"Precio Actual: ${_curr_price_b6:,.2f}",
+                                xref="paper", yref="paper", x=1.0, y=-0.15,
+                                showarrow=False, font=dict(color="#fbbf24", size=12),
+                            )
+                        st.plotly_chart(_fig_sens, use_container_width=True)
+                    else:
+                        st.info("No se pudo calcular la tabla de sensibilidad DCF. Datos insuficientes.")
+            except Exception as _e_b6:
+                st.warning(f"Error calculando sensibilidad DCF: {_e_b6}")
+
+        # ── B7: Multiples Dashboard ──
+        with st.expander("📈 Dashboard de Múltiplos", expanded=False):
+            try:
+                if st.button("Calcular Múltiplos", key="btn_multiples_dashboard"):
+                    with st.spinner("Calculando múltiplos de valoración…"):
+                        _mult_result = valuation.compute_multiples(ticker_solo)
+                    _multiples_list = _mult_result.get("multiples", [])
+                    _mult_sector = _mult_result.get("sector", "N/A")
+                    if _multiples_list:
+                        st.markdown(f"""
+                        <div style='text-align:center;margin-bottom:12px;'>
+                          <span style='color:#94a3b8;font-size:12px;'>Sector: </span>
+                          <span style='color:#60a5fa;font-size:13px;font-weight:600;'>{_mult_sector}</span>
+                        </div>""", unsafe_allow_html=True)
+
+                        _m_names = []
+                        _m_values = []
+                        _m_medians = []
+                        _m_colors = []
+                        _m_signals = []
+                        for _m in _multiples_list:
+                            if _m.get("value") is not None:
+                                _m_names.append(_m["name"])
+                                _m_values.append(round(_m["value"], 2))
+                                _m_medians.append(_m.get("sector_median") or 0)
+                                _m_colors.append(_m.get("color", "#fbbf24"))
+                                _sig_label = {"cheap": "BARATO", "fair": "JUSTO", "expensive": "CARO"}.get(_m.get("signal", "fair"), "JUSTO")
+                                _m_signals.append(_sig_label)
+
+                        if _m_names:
+                            _fig_mult = go.Figure()
+                            _fig_mult.add_trace(go.Bar(
+                                y=_m_names, x=_m_values,
+                                orientation='h',
+                                name="Valor Actual",
+                                marker_color=_m_colors,
+                                text=[f"{v:.2f}" for v in _m_values],
+                                textposition="outside",
+                                textfont=dict(color="#94a3b8", size=10),
+                            ))
+                            _fig_mult.add_trace(go.Scatter(
+                                y=_m_names, x=_m_medians,
+                                mode="markers",
+                                name="Mediana Sector",
+                                marker=dict(color="#a78bfa", size=10, symbol="diamond",
+                                            line=dict(color="#f0f6ff", width=1)),
+                            ))
+                            _fig_mult.update_layout(
+                                **dark_layout(
+                                    height=max(350, len(_m_names) * 40),
+                                    title=dict(text=f"Múltiplos de Valoración — {ticker_solo}",
+                                               font=dict(color="#94a3b8", size=14), x=0.5),
+                                    showlegend=True,
+                                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a",
+                                                font=dict(color="#94a3b8", size=10)),
+                                    xaxis=dict(title="Valor", gridcolor="#1a1a1a"),
+                                    yaxis=dict(autorange="reversed"),
+                                    margin=dict(l=80, r=60, t=40, b=40),
+                                ),
+                            )
+                            st.plotly_chart(_fig_mult, use_container_width=True)
+
+                            # Signal summary badges
+                            _sig_html = "<div style='display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px;'>"
+                            for _mn, _mv, _ms, _mc in zip(_m_names, _m_values, _m_signals, _m_colors):
+                                _sig_html += f"""<div style='background:#0a0a0a;border:1px solid {_mc};
+                                    border-radius:8px;padding:6px 12px;text-align:center;'>
+                                    <span style='color:#94a3b8;font-size:11px;'>{_mn}</span><br>
+                                    <span style='color:{_mc};font-weight:700;font-size:12px;'>{_ms}</span></div>"""
+                            _sig_html += "</div>"
+                            st.markdown(_sig_html, unsafe_allow_html=True)
+                        else:
+                            st.info("No se pudieron calcular múltiplos para este ticker.")
+                    else:
+                        st.info("No hay datos de múltiplos disponibles.")
+            except Exception as _e_b7:
+                st.warning(f"Error calculando múltiplos: {_e_b7}")
+
+        # ── B8: Capital Returns Cards ──
+        with st.expander("💰 Retornos de Capital", expanded=False):
+            try:
+                if st.button("Calcular Retornos de Capital", key="btn_capital_returns"):
+                    with st.spinner("Calculando retornos de capital…"):
+                        _cap_ret = valuation.compute_capital_returns(ticker_solo)
+                    if _cap_ret:
+                        _roic_val = _cap_ret.get("roic")
+                        _roce_val = _cap_ret.get("roce")
+                        _sh_yield = _cap_ret.get("shareholder_yield")
+                        _div_y = _cap_ret.get("div_yield", 0) or 0
+                        _buyback_y = _cap_ret.get("buyback_yield", 0) or 0
+                        _debt_pay_y = _cap_ret.get("debt_paydown_yield", 0) or 0
+
+                        def _roic_color(v):
+                            if v is None:
+                                return "blue"
+                            if v > 15:
+                                return "green"
+                            elif v > 10:
+                                return "blue"
+                            return "red"
+
+                        _cr1, _cr2, _cr3 = st.columns(3)
+                        _cr1.markdown(kpi("ROIC",
+                            f"{_roic_val:.2f}%" if _roic_val is not None else "N/A",
+                            "Retorno sobre Capital Invertido",
+                            _roic_color(_roic_val)), unsafe_allow_html=True)
+                        _cr2.markdown(kpi("ROCE",
+                            f"{_roce_val:.2f}%" if _roce_val is not None else "N/A",
+                            "Retorno sobre Capital Empleado",
+                            _roic_color(_roce_val)), unsafe_allow_html=True)
+                        _cr3.markdown(kpi("SHAREHOLDER YIELD",
+                            f"{_sh_yield:.2f}%" if _sh_yield is not None else "N/A",
+                            "Div + Buyback + Debt Paydown",
+                            "green" if _sh_yield and _sh_yield > 3 else ("blue" if _sh_yield and _sh_yield > 0 else "red")),
+                            unsafe_allow_html=True)
+
+                        st.markdown("""<div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;
+                                    letter-spacing:1px;font-weight:600;margin:16px 0 8px;'>
+                                    Desglose Shareholder Yield</div>""", unsafe_allow_html=True)
+                        _br1, _br2, _br3 = st.columns(3)
+                        _br1.markdown(kpi("DIVIDENDO", f"{_div_y:.2f}%",
+                            "Rendimiento por dividendo", "green" if _div_y > 0 else "blue"),
+                            unsafe_allow_html=True)
+                        _br2.markdown(kpi("RECOMPRA", f"{_buyback_y:.2f}%",
+                            "Buyback yield (cambio acciones)", "green" if _buyback_y > 0 else ("red" if _buyback_y < 0 else "blue")),
+                            unsafe_allow_html=True)
+                        _br3.markdown(kpi("PAGO DEUDA", f"{_debt_pay_y:.2f}%",
+                            "Reduccion de deuda / Mkt Cap", "green" if _debt_pay_y > 0 else ("red" if _debt_pay_y < 0 else "blue")),
+                            unsafe_allow_html=True)
+
+                        _components = [
+                            ("Dividendo", _div_y, "#34d399"),
+                            ("Recompra", _buyback_y, "#60a5fa"),
+                            ("Pago Deuda", _debt_pay_y, "#a78bfa"),
+                        ]
+                        _fig_cr = go.Figure()
+                        for _comp_name, _comp_val, _comp_clr in _components:
+                            _fig_cr.add_trace(go.Bar(
+                                x=[_comp_name], y=[_comp_val],
+                                marker_color=_comp_clr,
+                                name=_comp_name,
+                                text=[f"{_comp_val:.2f}%"],
+                                textposition="outside",
+                                textfont=dict(color="#94a3b8", size=11),
+                            ))
+                        _fig_cr.update_layout(
+                            **dark_layout(
+                                height=280,
+                                title=dict(text="Componentes del Shareholder Yield",
+                                           font=dict(color="#94a3b8", size=13), x=0.5),
+                                showlegend=False,
+                                yaxis=dict(title="%", gridcolor="#1a1a1a"),
+                            ),
+                        )
+                        st.plotly_chart(_fig_cr, use_container_width=True)
+                    else:
+                        st.info("No se pudieron calcular retornos de capital.")
+            except Exception as _e_b8:
+                st.warning(f"Error calculando retornos de capital: {_e_b8}")
+
+        # ── A1: Waterfall Income Statement ──
+        with st.expander("📊 Waterfall — Estado de Resultados", expanded=False):
+            try:
+                if st.button("Generar Waterfall", key="btn_waterfall_income"):
+                    with st.spinner("Obteniendo estado de resultados…"):
+                        _tk_a1 = yf.Ticker(ticker_solo)
+                        _inc_a1 = _tk_a1.income_stmt
+                    if _inc_a1 is not None and not _inc_a1.empty:
+                        def _get_a1(labels):
+                            for _lbl in labels:
+                                if _lbl in _inc_a1.index:
+                                    _v = _inc_a1.loc[_lbl].iloc[0]
+                                    if _v is not None and _v == _v:
+                                        return float(_v)
+                            return 0
+
+                        _revenue = _get_a1(["Total Revenue", "Revenue"])
+                        _cost_rev = _get_a1(["Cost Of Revenue", "Cost of Revenue"])
+                        _gross_profit = _get_a1(["Gross Profit"])
+                        if _gross_profit == 0 and _revenue and _cost_rev:
+                            _gross_profit = _revenue - _cost_rev
+                        _opex = _get_a1(["Operating Expense", "Total Operating Expenses", "Selling General And Administration"])
+                        _ebit = _get_a1(["EBIT", "Operating Income"])
+                        _interest = _get_a1(["Interest Expense", "Net Interest Income"])
+                        _tax = _get_a1(["Tax Provision", "Income Tax Expense"])
+                        _net_income = _get_a1(["Net Income", "Net Income Common Stockholders"])
+
+                        def _fmt_abbr(v):
+                            if abs(v) >= 1e9:
+                                return f"${v/1e9:.1f}B"
+                            elif abs(v) >= 1e6:
+                                return f"${v/1e6:.1f}M"
+                            elif abs(v) >= 1e3:
+                                return f"${v/1e3:.1f}K"
+                            return f"${v:.0f}"
+
+                        _wf_labels = ["Revenue", "Cost of Revenue", "Gross Profit",
+                                      "Operating Exp.", "EBIT", "Interest Exp.",
+                                      "Tax Provision", "Net Income"]
+                        _wf_measures = ["absolute", "relative", "total",
+                                        "relative", "total", "relative",
+                                        "relative", "total"]
+                        _wf_values = [_revenue, -abs(_cost_rev), _gross_profit,
+                                      -abs(_opex) if _opex else -(_gross_profit - _ebit),
+                                      _ebit,
+                                      -abs(_interest) if _interest else 0,
+                                      -abs(_tax) if _tax else 0,
+                                      _net_income]
+                        _wf_text = [_fmt_abbr(v) for v in _wf_values]
+
+                        _fig_wf = go.Figure(go.Waterfall(
+                            name="Income Statement",
+                            orientation="v",
+                            measure=_wf_measures,
+                            x=_wf_labels,
+                            y=_wf_values,
+                            text=_wf_text,
+                            textposition="outside",
+                            textfont=dict(color="#94a3b8", size=10),
+                            increasing=dict(marker=dict(color="#34d399")),
+                            decreasing=dict(marker=dict(color="#f87171")),
+                            totals=dict(marker=dict(color="#3b82f6")),
+                            connector=dict(line=dict(color="#1a1a1a", width=1)),
+                        ))
+                        _fig_wf.update_layout(
+                            **dark_layout(
+                                height=420,
+                                title=dict(text=f"Waterfall — Estado de Resultados ({ticker_solo})",
+                                           font=dict(color="#94a3b8", size=14), x=0.5),
+                                showlegend=False,
+                                yaxis=dict(title="USD", gridcolor="#1a1a1a"),
+                                margin=dict(l=60, r=30, t=50, b=40),
+                            ),
+                        )
+                        st.plotly_chart(_fig_wf, use_container_width=True)
+
+                        _margin_net = (_net_income / _revenue * 100) if _revenue else 0
+                        _margin_gross = (_gross_profit / _revenue * 100) if _revenue else 0
+                        _margin_op = (_ebit / _revenue * 100) if _revenue else 0
+                        _wm1, _wm2, _wm3 = st.columns(3)
+                        _wm1.markdown(kpi("Margen Bruto", f"{_margin_gross:.1f}%", fmt(_gross_profit), "green"),
+                                     unsafe_allow_html=True)
+                        _wm2.markdown(kpi("Margen Operativo", f"{_margin_op:.1f}%", fmt(_ebit), "blue"),
+                                     unsafe_allow_html=True)
+                        _wm3.markdown(kpi("Margen Neto", f"{_margin_net:.1f}%", fmt(_net_income),
+                                     "green" if _margin_net > 15 else ("yellow" if _margin_net > 5 else "red")),
+                                     unsafe_allow_html=True)
+                    else:
+                        st.info("No se pudo obtener el estado de resultados para este ticker.")
+            except Exception as _e_a1:
+                st.warning(f"Error generando waterfall: {_e_a1}")
 
         # ── AI ANALYSIS (standalone) ──
         st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)

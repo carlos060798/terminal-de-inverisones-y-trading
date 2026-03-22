@@ -15,6 +15,11 @@ try:
 except ImportError:
     yf = None
 
+try:
+    from cache_utils import get_batch_prices
+except ImportError:
+    get_batch_prices = None
+
 
 def render():
     st.markdown("""
@@ -24,6 +29,41 @@ def render():
         <p>Resumen ejecutivo · Cartera · Trading · Análisis recientes</p>
       </div>
     </div>""", unsafe_allow_html=True)
+
+    # ── H2: Earnings Alert Banner ──
+    try:
+        watchlist = db.get_watchlist()
+        upcoming = []
+        for row_idx in range(min(10, len(watchlist))):
+            try:
+                row = watchlist.iloc[row_idx]
+                cal = yf.Ticker(row['ticker']).calendar
+                if cal is not None:
+                    if isinstance(cal, dict):
+                        ed = cal.get('Earnings Date', [None])
+                        if ed and ed[0]:
+                            from datetime import datetime as _dt
+                            diff = (ed[0] - _dt.now()).days
+                            if 0 <= diff <= 7:
+                                upcoming.append((row['ticker'], ed[0].strftime('%Y-%m-%d'), diff))
+                    elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                        if "Earnings Date" in cal.index:
+                            ed_vals = cal.loc["Earnings Date"]
+                            for ed_val in ed_vals:
+                                if pd.notna(ed_val):
+                                    from datetime import datetime as _dt
+                                    ed_ts = pd.Timestamp(ed_val)
+                                    diff = (ed_ts - pd.Timestamp(_dt.now())).days
+                                    if 0 <= diff <= 7:
+                                        upcoming.append((row['ticker'], ed_ts.strftime('%Y-%m-%d'), diff))
+                                    break
+            except Exception:
+                pass
+        if upcoming:
+            msg = " | ".join([f"**{t}** reporta en {d} dias ({dt})" for t, dt, d in upcoming])
+            st.warning(f"Earnings proximos: {msg}")
+    except Exception:
+        pass
 
     # ── PORTFOLIO SUMMARY ──
     wl = db.get_watchlist()
@@ -38,15 +78,34 @@ def render():
     positions = 0
     if not wl.empty and yf:
         positions = len(wl)
-        for _, row in wl.iterrows():
-            try:
-                price = yf.Ticker(row["ticker"]).fast_info.last_price or 0
-                val = row["shares"] * price
-                inv = row["shares"] * row["avg_cost"]
-                total_val += val
-                total_inv += inv
-            except Exception:
-                total_inv += row["shares"] * row["avg_cost"]
+        # P2: Batch download — single API call for all tickers
+        try:
+            tickers_list = [row["ticker"] for _, row in wl.iterrows()]
+            if tickers_list and get_batch_prices is not None:
+                prices_map = get_batch_prices(tuple(tickers_list))
+            else:
+                prices_map = {}
+            for _, row in wl.iterrows():
+                try:
+                    price = prices_map.get(row["ticker"], 0)
+                    if price == 0:
+                        price = yf.Ticker(row["ticker"]).fast_info.last_price or 0
+                    val = row["shares"] * price
+                    inv = row["shares"] * row["avg_cost"]
+                    total_val += val
+                    total_inv += inv
+                except Exception:
+                    total_inv += row["shares"] * row["avg_cost"]
+        except Exception:
+            for _, row in wl.iterrows():
+                try:
+                    price = yf.Ticker(row["ticker"]).fast_info.last_price or 0
+                    val = row["shares"] * price
+                    inv = row["shares"] * row["avg_cost"]
+                    total_val += val
+                    total_inv += inv
+                except Exception:
+                    total_inv += row["shares"] * row["avg_cost"]
 
         total_pnl_portfolio = total_val - total_inv
 
@@ -237,6 +296,43 @@ def render():
             st.info("Sin trades registrados para métricas de riesgo.")
     except Exception as e:
         st.info(f"No se pudieron calcular métricas de riesgo: {e}")
+
+    # ── E1: QuantStats Tearsheet ──
+    with st.expander("📋 Tearsheet Profesional (QuantStats)"):
+        try:
+            import quantstats as qs
+            trades = db.get_trades()
+            if trades.empty:
+                st.info("Registra trades para generar el tearsheet")
+            else:
+                df = trades.copy()
+                df_closed = df[df['exit_price'] > 0].copy()
+                if len(df_closed) < 2:
+                    st.info("Necesitas al menos 2 trades cerrados")
+                else:
+                    # Build returns series from trade P&L
+                    df_closed['trade_date'] = pd.to_datetime(df_closed['trade_date'])
+                    df_closed = df_closed.sort_values('trade_date')
+                    df_closed['pnl'] = (df_closed['exit_price'] - df_closed['entry_price']) * df_closed['quantity']
+
+                    # Create daily returns approximation
+                    returns = df_closed.set_index('trade_date')['pnl']
+                    returns = returns.resample('D').sum().fillna(0)
+                    # Convert to percentage returns (assume $10k base)
+                    base = 10000
+                    returns_pct = returns / base
+
+                    if st.button("Generar Tearsheet", key="qs_btn"):
+                        with st.spinner("Generando..."):
+                            try:
+                                html = qs.reports.html(returns_pct, benchmark="SPY", output="string", title="Quantum Portfolio")
+                                st.components.v1.html(html, height=800, scrolling=True)
+                            except Exception as e_qs:
+                                st.error(f"Error generando tearsheet: {e_qs}")
+        except ImportError:
+            st.info("Instala quantstats: pip install quantstats")
+        except Exception as e:
+            st.error(f"Error generando tearsheet: {e}")
 
     # ── MARKET SENTIMENT (multi-source) ──
     try:

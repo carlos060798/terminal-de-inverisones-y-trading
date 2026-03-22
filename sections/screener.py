@@ -8,7 +8,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 import database as db
-from ui_shared import DARK, fmt, kpi
+from ui_shared import DARK, dark_layout, fmt, kpi
 
 try:
     from finvizfinance.screener.overview import Overview
@@ -771,11 +771,12 @@ def _render_global_indices():
             textfont=dict(color="#94a3b8", size=10),
         ))
         fig_ytd.update_layout(
-            **DARK,
-            height=max(400, len(chart_df) * 28),
-            title=dict(text="YTD Performance (%)", font=dict(color="#94a3b8", size=14), x=0.5),
-            showlegend=False,
-            xaxis=dict(title="YTD %", ticksuffix="%"),
+            **dark_layout(
+                height=max(400, len(chart_df) * 28),
+                title=dict(text="YTD Performance (%)", font=dict(color="#94a3b8", size=14), x=0.5),
+                showlegend=False,
+                xaxis=dict(title="YTD %", ticksuffix="%"),
+            )
         )
         st.plotly_chart(fig_ytd, use_container_width=True)
 

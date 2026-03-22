@@ -180,6 +180,32 @@ def init_db():
         except Exception:
             pass
 
+    # D1: Add journal upgrade columns to trades table
+    for col_def in [
+        "ALTER TABLE trades ADD COLUMN hold_time INTEGER DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN risk_pct REAL DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN setup_type TEXT DEFAULT ''",
+        "ALTER TABLE trades ADD COLUMN error_type TEXT DEFAULT ''",
+        "ALTER TABLE trades ADD COLUMN trade_rating INTEGER DEFAULT 3",
+        "ALTER TABLE trades ADD COLUMN stop_loss REAL",
+        "ALTER TABLE trades ADD COLUMN take_profit REAL",
+    ]:
+        try:
+            c.execute(col_def)
+        except Exception:
+            pass
+
+    # D1: Add journal upgrade columns to forex_trades table
+    for col_def in [
+        "ALTER TABLE forex_trades ADD COLUMN hold_time INTEGER DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN setup_type TEXT DEFAULT ''",
+        "ALTER TABLE forex_trades ADD COLUMN trade_rating INTEGER DEFAULT 3",
+    ]:
+        try:
+            c.execute(col_def)
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -226,7 +252,9 @@ def update_ticker(ticker: str, shares: float, avg_cost: float,
 # ── TRADES ─────────────────────────────────────────────────────────────────────
 def add_trade(trade_date, ticker, trade_type, entry_price,
               exit_price, shares, strategy, psych_notes,
-              lecciones="", errores=""):
+              lecciones="", errores="",
+              setup_type="", error_type="", trade_rating=3,
+              stop_loss=None, take_profit=None):
     pnl, pnl_pct = None, None
     if exit_price and exit_price > 0:
         if trade_type == "Compra":
@@ -240,11 +268,13 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
     conn.execute(
         """INSERT INTO trades
            (trade_date, ticker, trade_type, entry_price, exit_price,
-            shares, pnl, pnl_pct, strategy, psych_notes, lecciones, errores)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            shares, pnl, pnl_pct, strategy, psych_notes, lecciones, errores,
+            setup_type, error_type, trade_rating, stop_loss, take_profit)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), ticker.upper(), trade_type, entry_price,
          exit_price, shares, pnl, pnl_pct, strategy, psych_notes,
-         lecciones, errores)
+         lecciones, errores, setup_type, error_type, trade_rating,
+         stop_loss, take_profit)
     )
     conn.commit()
     conn.close()
@@ -422,17 +452,20 @@ def get_analyzed_tickers() -> list:
 # ── FOREX / INDICES TRADES ────────────────────────────────────────────────────
 def add_forex_trade(trade_date, instrument, instrument_type, direction,
                     lots, entry_price, exit_price, stop_loss, take_profit,
-                    pips, pnl, commission, swap, strategy, timeframe, session, notes):
+                    pips, pnl, commission, swap, strategy, timeframe, session, notes,
+                    setup_type="", trade_rating=3):
     conn = get_connection()
     conn.execute(
         """INSERT INTO forex_trades
            (trade_date, instrument, instrument_type, direction, lots,
             entry_price, exit_price, stop_loss, take_profit, pips, pnl,
-            commission, swap, strategy, timeframe, session, notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            commission, swap, strategy, timeframe, session, notes,
+            setup_type, trade_rating)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), instrument.upper(), instrument_type, direction,
          lots, entry_price, exit_price, stop_loss, take_profit,
-         pips, pnl, commission, swap, strategy, timeframe, session, notes)
+         pips, pnl, commission, swap, strategy, timeframe, session, notes,
+         setup_type, trade_rating)
     )
     conn.commit()
     conn.close()
