@@ -5,7 +5,19 @@ All free tiers, no cost.
 """
 import streamlit as st
 import json
+import os
 from typing import Optional
+
+
+def _get_secret(name: str) -> str:
+    """Get secret from st.secrets or os.environ (for HF Spaces / Docker)."""
+    try:
+        val = st.secrets.get(name)
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.environ.get(name, "")
 
 # ---------------------------------------------------------------------------
 # Provider imports (all optional)
@@ -56,7 +68,7 @@ def _get_gemini():
     if not HAS_GEMINI:
         return None
     try:
-        key = st.secrets.get("GEMINI_API_KEY")
+        key = _get_secret("GEMINI_API_KEY")
         if key:
             genai.configure(api_key=key)
             return genai.GenerativeModel("gemini-2.0-flash")
@@ -71,7 +83,7 @@ def _get_groq():
     if not HAS_GROQ:
         return None
     try:
-        key = st.secrets.get("GROQ_API_KEY")
+        key = _get_secret("GROQ_API_KEY")
         if key:
             return Groq(api_key=key)
     except Exception:
@@ -85,7 +97,7 @@ def _get_openrouter():
     if not HAS_OPENROUTER:
         return None
     try:
-        key = st.secrets.get("OPENROUTER_API_KEY")
+        key = _get_secret("OPENROUTER_API_KEY")
         if key:
             return OpenAI(
                 base_url="https://openrouter.ai/api/v1",

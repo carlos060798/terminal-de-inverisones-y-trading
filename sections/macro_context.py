@@ -6,6 +6,7 @@ Falls back to yfinance treasury symbols if FRED key not configured.
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import os
 from datetime import datetime, timedelta
 from ui_shared import DARK, dark_layout, fmt, kpi
 import ai_engine
@@ -25,7 +26,7 @@ def _get_fred():
     if not HAS_FRED:
         return None
     try:
-        key = st.secrets.get("FRED_API_KEY")
+        key = st.secrets.get("FRED_API_KEY") or os.environ.get("FRED_API_KEY", "")
         if key:
             return Fred(api_key=key)
     except Exception:

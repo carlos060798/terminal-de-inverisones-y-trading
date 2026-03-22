@@ -30,7 +30,7 @@ def _check_fred():
     """Test FRED API connectivity."""
     try:
         from fredapi import Fred
-        key = st.secrets.get("FRED_API_KEY", "")
+        key = st.secrets.get("FRED_API_KEY", "") or os.environ.get("FRED_API_KEY", "")
         if not key:
             return False, 0
         t0 = time.time()
