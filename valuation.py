@@ -791,6 +791,62 @@ def compute_dcf_professional(ticker: str) -> dict:
         return {}
 
 
+def monte_carlo_dcf(ticker, n_simulations=1000, wacc_sigma=0.01, growth_sigma=0.02, g_sigma=0.005):
+    """Monte Carlo simulation over DCF, varying WACC, revenue growth, and terminal g.
+    Returns distribution of fair values with probability metrics."""
+    import numpy as np
+    try:
+        base = compute_dcf_professional(ticker)
+        if not base or "error" in base:
+            return None
+        fcff_base = base.get("fcff", 0)
+        wacc_base = base.get("wacc", 0.10)
+        growth_base = base.get("rev_growth", 0.05)
+        g_base = 0.03
+        total_debt = base.get("total_debt", 0)
+        cash = base.get("cash", 0)
+        shares = base.get("shares", 1)
+        current_price = base.get("current_price", 0)
+        if fcff_base <= 0 or shares <= 0:
+            return None
+        np.random.seed(42)
+        waccs = np.clip(np.random.normal(wacc_base, wacc_sigma, n_simulations), 0.04, 0.20)
+        growths = np.clip(np.random.normal(growth_base, growth_sigma, n_simulations), -0.10, 0.40)
+        gs = np.clip(np.random.normal(g_base, g_sigma, n_simulations), 0.01, 0.05)
+        fair_values = []
+        for w, gr, g in zip(waccs, growths, gs):
+            if w <= g + 0.005:
+                continue
+            try:
+                projected = [fcff_base * (1 + gr) ** i for i in range(1, 6)]
+                tv = projected[-1] * (1 + g) / (w - g)
+                pv_fcff = sum(fcf / (1 + w) ** t for t, fcf in enumerate(projected, 1))
+                pv_tv = tv / (1 + w) ** 5
+                equity = pv_fcff + pv_tv - total_debt + cash
+                fv_ps = equity / shares
+                if 0 < fv_ps < current_price * 20:
+                    fair_values.append(fv_ps)
+            except Exception:
+                continue
+        if len(fair_values) < 100:
+            return None
+        fv = np.array(fair_values)
+        return {
+            "fair_values": fv, "n_valid": len(fv),
+            "mean": float(np.mean(fv)), "median": float(np.median(fv)), "std": float(np.std(fv)),
+            "p5": float(np.percentile(fv, 5)), "p10": float(np.percentile(fv, 10)),
+            "p25": float(np.percentile(fv, 25)), "p75": float(np.percentile(fv, 75)),
+            "p90": float(np.percentile(fv, 90)), "p95": float(np.percentile(fv, 95)),
+            "current_price": current_price,
+            "prob_above_price": float((fv > current_price).sum() / len(fv) * 100),
+            "prob_20pct_upside": float((fv > current_price * 1.2).sum() / len(fv) * 100),
+            "prob_50pct_upside": float((fv > current_price * 1.5).sum() / len(fv) * 100),
+            "wacc_base": wacc_base, "growth_base": growth_base, "g_base": g_base,
+        }
+    except Exception:
+        return None
+
+
 def compute_capital_returns(ticker: str) -> dict:
     """Compute ROIC, ROCE, and Shareholder Yield (B3 + B4)."""
     result = {

@@ -2223,6 +2223,63 @@ def render():
             except Exception as _e_b6:
                 st.warning(f"Error calculando sensibilidad DCF: {_e_b6}")
 
+        # ── Monte Carlo DCF ──
+        with st.expander("🎲 Monte Carlo DCF — Simulacion Probabilistica", expanded=False):
+            try:
+                _mc_c1, _mc_c2, _mc_c3 = st.columns(3)
+                _mc_ws = _mc_c1.slider("σ WACC (%)", 0.5, 3.0, 1.0, 0.1, key="mc_wacc") / 100
+                _mc_gs = _mc_c2.slider("σ Crecimiento (%)", 0.5, 5.0, 2.0, 0.5, key="mc_growth") / 100
+                _mc_ts = _mc_c3.slider("σ Terminal g (%)", 0.1, 1.5, 0.5, 0.1, key="mc_g") / 100
+                if st.button("🎲 Ejecutar 1,000 Simulaciones", key="mc_run"):
+                    with st.spinner("Ejecutando Monte Carlo DCF…"):
+                        _mc = valuation.monte_carlo_dcf(ticker_solo, 1000, _mc_ws, _mc_gs, _mc_ts)
+                    if _mc is None:
+                        st.warning("No se pudo ejecutar Monte Carlo. Datos insuficientes.")
+                    else:
+                        _pc = "#34d399" if _mc["prob_above_price"] >= 50 else "#f87171"
+                        _k1, _k2, _k3, _k4 = st.columns(4)
+                        for _col, _lbl, _val, _clr in [
+                            (_k1, "P(FV > Precio)", f"{_mc['prob_above_price']:.1f}%", _pc),
+                            (_k2, "P(Upside > 20%)", f"{_mc['prob_20pct_upside']:.1f}%", "#60a5fa"),
+                            (_k3, "Mediana FV", f"${_mc['median']:,.2f}", "#e2e8f0"),
+                            (_k4, "IC 90%", f"${_mc['p5']:,.0f}-${_mc['p95']:,.0f}", "#e2e8f0"),
+                        ]:
+                            _col.markdown(f"<div style='background:#0a0a0a;border-radius:8px;padding:12px;text-align:center;border:1px solid #1a1a1a'>"
+                                          f"<div style='color:#94a3b8;font-size:11px'>{_lbl}</div>"
+                                          f"<div style='color:{_clr};font-size:22px;font-weight:700'>{_val}</div></div>", unsafe_allow_html=True)
+                        _fv = _mc["fair_values"]
+                        _above = _fv[_fv >= _mc["current_price"]]
+                        _below = _fv[_fv < _mc["current_price"]]
+                        import plotly.graph_objects as _mcgo
+                        _fig_mc = _mcgo.Figure()
+                        _fig_mc.add_trace(_mcgo.Histogram(x=_below, nbinsx=30, name="< Precio", marker_color="#f87171", opacity=0.7))
+                        _fig_mc.add_trace(_mcgo.Histogram(x=_above, nbinsx=30, name="> Precio", marker_color="#34d399", opacity=0.7))
+                        _fig_mc.add_vline(x=_mc["current_price"], line_dash="dash", line_color="#fbbf24", line_width=2,
+                                          annotation_text=f"Precio: ${_mc['current_price']:,.2f}", annotation_font_color="#fbbf24")
+                        _fig_mc.add_vline(x=_mc["median"], line_dash="dot", line_color="#60a5fa", line_width=1,
+                                          annotation_text=f"Mediana: ${_mc['median']:,.2f}", annotation_font_color="#60a5fa",
+                                          annotation_position="top left")
+                        _fig_mc.update_layout(**dark_layout(height=400,
+                            title=dict(text=f"Distribucion Fair Value — {_mc['n_valid']} sims", font=dict(color="#94a3b8"), x=0.5),
+                            xaxis=dict(title="Fair Value ($)"), yaxis=dict(title="Frecuencia"),
+                            barmode="stack", showlegend=True,
+                            legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8"))))
+                        st.plotly_chart(_fig_mc, use_container_width=True)
+                        _fig_bx = _mcgo.Figure()
+                        _fig_bx.add_trace(_mcgo.Box(x=_fv, name="Fair Values", marker_color="#3b82f6", boxpoints="outliers"))
+                        _fig_bx.add_vline(x=_mc["current_price"], line_dash="dash", line_color="#fbbf24", line_width=2)
+                        _fig_bx.update_layout(**dark_layout(height=180, xaxis=dict(title="Fair Value ($)"), showlegend=False))
+                        st.plotly_chart(_fig_bx, use_container_width=True)
+                        st.markdown(f"<div style='background:#0a0a0a;border-radius:8px;padding:16px;border:1px solid #1a1a1a'>"
+                                    f"<b style='color:#e2e8f0'>Resumen</b><br>"
+                                    f"<span style='color:#94a3b8'>Media: ${_mc['mean']:,.2f} | Std: ${_mc['std']:,.2f} | "
+                                    f"P5: ${_mc['p5']:,.2f} | P95: ${_mc['p95']:,.2f} | "
+                                    f"P(50%+ upside): {_mc['prob_50pct_upside']:.1f}%</span><br>"
+                                    f"<small style='color:#475569'>WACC: {_mc['wacc_base']*100:.1f}% | Growth: {_mc['growth_base']*100:.1f}% | g: {_mc['g_base']*100:.1f}%</small></div>",
+                                    unsafe_allow_html=True)
+            except Exception as _e_mc:
+                st.warning(f"Error en Monte Carlo: {_e_mc}")
+
         # ── B7: Multiples Dashboard ──
         with st.expander("📈 Dashboard de Múltiplos", expanded=False):
             try:

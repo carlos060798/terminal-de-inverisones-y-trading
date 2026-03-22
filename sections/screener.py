@@ -16,6 +16,15 @@ try:
 except ImportError:
     HAS_FINVIZ = False
 
+FILTER_PRESETS = {
+    "Personalizado": {},
+    "Value Investing": {"pe_max": 15.0, "div_min": 2.0, "de_max": 1.0, "roe_min": 10.0},
+    "Growth": {"rev_growth_min": 15.0, "roe_min": 15.0, "pe_max": 50.0},
+    "Quality Institucional": {"roic_min": 12.0, "piotroski_min": 6},
+    "Dividend": {"div_min": 3.0, "de_max": 1.5, "pe_max": 25.0},
+    "Safe Haven": {"beta_max": 0.8, "altman_z_min": 3.0, "de_max": 0.5},
+}
+
 # Popular tickers organized by sector
 POPULAR = {
     "Tech (US)":       ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "CRM", "ADBE", "INTC", "AMD", "INTU", "NOW", "ORCL"],
@@ -43,19 +52,23 @@ def _render_yfinance_screener():
             tickers_input = ", ".join(POPULAR[preset])
             st.text_input("Tickers seleccionados", value=tickers_input, disabled=True)
 
+    # ── INVESTMENT PROFILE PRESET ──
+    preset_inv = st.selectbox("Perfil de Inversion", list(FILTER_PRESETS.keys()), key="yf_preset")
+    p = FILTER_PRESETS[preset_inv]
+
     # ── FILTERS ──
     with st.expander("Filtros fundamentales"):
         fc1, fc2, fc3, fc4 = st.columns(4)
-        pe_max = fc1.number_input("P/E maximo", min_value=0.0, value=30.0, step=5.0)
-        roe_min = fc2.number_input("ROE minimo (%)", min_value=0.0, value=10.0, step=5.0)
-        margin_min = fc3.number_input("Margen neto min (%)", min_value=0.0, value=5.0, step=5.0)
+        pe_max = fc1.number_input("P/E maximo", min_value=0.0, value=p.get("pe_max", 30.0), step=5.0)
+        roe_min = fc2.number_input("ROE minimo (%)", min_value=0.0, value=p.get("roe_min", 10.0), step=5.0)
+        margin_min = fc3.number_input("Margen neto min (%)", min_value=0.0, value=p.get("margin_min", 5.0), step=5.0)
         mcap_min = fc4.selectbox("Market Cap min", ["Sin filtro", ">$1B", ">$10B", ">$100B", ">$1T"])
 
         fc5, fc6, fc7, fc8 = st.columns(4)
-        de_max = fc5.number_input("Deuda/Equity max", min_value=0.0, value=2.0, step=0.5)
-        div_min = fc6.number_input("Div Yield min (%)", min_value=0.0, value=0.0, step=0.5)
-        peg_max = fc7.number_input("PEG maximo", min_value=0.0, value=3.0, step=0.5)
-        beta_max = fc8.number_input("Beta maximo", min_value=0.0, value=3.0, step=0.5)
+        de_max = fc5.number_input("Deuda/Equity max", min_value=0.0, value=p.get("de_max", 2.0), step=0.5)
+        div_min = fc6.number_input("Div Yield min (%)", min_value=0.0, value=p.get("div_min", 0.0), step=0.5)
+        peg_max = fc7.number_input("PEG maximo", min_value=0.0, value=p.get("peg_max", 3.0), step=0.5)
+        beta_max = fc8.number_input("Beta maximo", min_value=0.0, value=p.get("beta_max", 3.0), step=0.5)
 
         # ── Extended filters ──
         st.markdown("---")
@@ -71,7 +84,7 @@ def _render_yfinance_screener():
             value=(_mcap_labels[0], _mcap_labels[-1]),
             key="yf_mcap_range",
         )
-        rev_growth_min = ef2.number_input("Crec. Ingresos min (%)", min_value=-100.0, value=0.0,
+        rev_growth_min = ef2.number_input("Crec. Ingresos min (%)", min_value=-100.0, value=p.get("rev_growth_min", 0.0),
                                            step=5.0, key="yf_rev_growth_min")
         beta_min = ef3.number_input("Beta minimo", min_value=0.0, value=0.0, step=0.1,
                                      key="yf_beta_min")
@@ -92,6 +105,15 @@ def _render_yfinance_screener():
             "Filtrar por Pais", value="", placeholder="ej: United States",
             key="yf_country_filter",
         )
+
+        st.markdown("---")
+        st.markdown("**Filtros Institucionales (Stage 2)**")
+        af1, af2, af3, af4, af5 = st.columns(5)
+        roic_min = af1.number_input("ROIC min %", 0.0, value=p.get("roic_min", 0.0), step=2.0, key="yf_roic_min")
+        roce_min = af2.number_input("ROCE min %", 0.0, value=p.get("roce_min", 0.0), step=2.0, key="yf_roce_min")
+        piotroski_min = af3.number_input("Piotroski min", 0, 9, value=int(p.get("piotroski_min", 0)), key="yf_piotroski_min")
+        altman_z_min = af4.number_input("Altman Z min", 0.0, value=p.get("altman_z_min", 0.0), step=0.5, key="yf_altman_z_min")
+        sy_min = af5.number_input("SY min %", 0.0, value=p.get("sy_min", 0.0), step=1.0, key="yf_sy_min")
 
     if st.button("Escanear mercado", type="primary"):
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
@@ -208,6 +230,45 @@ def _render_yfinance_screener():
             cf_lower = country_filter.strip().lower()
             results = [r for r in results if cf_lower in r.get("Pais", "").lower()]
 
+        # ── Stage 2: Institutional metrics filtering ──
+        try:
+            need_stage2 = any([roic_min > 0, roce_min > 0, piotroski_min > 0, altman_z_min > 0, sy_min > 0])
+            if need_stage2 and results:
+                from cache_utils import cached_capital_returns, cached_health_scores
+                st.info(f"Stage 2: Calculando metricas institucionales para {len(results)} tickers...")
+                progress_s2 = st.progress(0)
+                enriched = []
+                for idx_s2, row in enumerate(results):
+                    progress_s2.progress((idx_s2 + 1) / len(results))
+                    t = row["Ticker"]
+                    try:
+                        cr = cached_capital_returns(t)
+                        hs = cached_health_scores(t)
+                        roic_v = cr.get("roic", 0) if cr else 0
+                        roce_v = cr.get("roce", 0) if cr else 0
+                        sy_v = cr.get("shareholder_yield", 0) if cr else 0
+                        f_v = hs.get("f_score", 0) if hs else 0
+                        z_v = hs.get("z_score", 0) if hs else 0
+
+                        if roic_min > 0 and (roic_v is None or roic_v < roic_min): continue
+                        if roce_min > 0 and (roce_v is None or roce_v < roce_min): continue
+                        if piotroski_min > 0 and (f_v is None or f_v < piotroski_min): continue
+                        if altman_z_min > 0 and (z_v is None or z_v < altman_z_min): continue
+                        if sy_min > 0 and (sy_v is None or sy_v < sy_min): continue
+
+                        row["ROIC %"] = round(roic_v * 100, 1) if roic_v else None
+                        row["ROCE %"] = round(roce_v * 100, 1) if roce_v else None
+                        row["Piotroski"] = f_v
+                        row["Altman Z"] = round(z_v, 2) if z_v else None
+                        row["SY %"] = round(sy_v * 100, 1) if sy_v else None
+                        enriched.append(row)
+                    except:
+                        enriched.append(row)
+                results = enriched
+                progress_s2.empty()
+        except Exception:
+            pass
+
         if not results:
             st.warning("Ninguna accion paso los filtros. Intenta con criterios mas amplios.")
             return
@@ -284,15 +345,40 @@ def _render_yfinance_screener():
                 return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
             return "background-color: rgba(248,113,113,0.15); color: #f87171"
 
+        # Piotroski F-Score color
+        def piotroski_color(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return "color:#475569"
+            if v >= 7:
+                return "background-color: rgba(52,211,153,0.2); color: #34d399; font-weight: 700"
+            elif v >= 4:
+                return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
+            return "background-color: rgba(248,113,113,0.15); color: #f87171"
+
+        # Altman Z-Score color
+        def altman_color(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return "color:#475569"
+            if v >= 3.0:
+                return "background-color: rgba(52,211,153,0.2); color: #34d399; font-weight: 700"
+            elif v >= 1.8:
+                return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
+            return "background-color: rgba(248,113,113,0.15); color: #f87171"
+
         display_cols = ["Ticker", "Empresa", "Sector", "Pais", "Precio", "P/E", "P/E Fwd",
                         "ROE %", "Margen %", "D/E", "PEG", "Beta", "Div %", "Crec Rev %",
-                        "Vol Prom", "Score", "Quant"]
+                        "Vol Prom", "Score", "Quant",
+                        "ROIC %", "ROCE %", "Piotroski", "Altman Z", "SY %"]
         available_cols = [c for c in display_cols if c in df.columns]
         df_show = df[available_cols].copy()
 
         style_obj = df_show.style.map(score_color, subset=["Score"])
         if "Quant" in df_show.columns:
             style_obj = style_obj.map(quant_color, subset=["Quant"])
+        if "Piotroski" in df_show.columns:
+            style_obj = style_obj.map(piotroski_color, subset=["Piotroski"])
+        if "Altman Z" in df_show.columns:
+            style_obj = style_obj.map(altman_color, subset=["Altman Z"])
 
         st.dataframe(
             style_obj.format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
@@ -907,6 +993,239 @@ def _render_security_finder():
         st.warning(f"Error en el buscador: {e}")
 
 
+def _render_earnings_calendar():
+    """Earnings calendar for S&P 500 and watchlist tickers."""
+    try:
+        st.markdown("### Calendario de Earnings — S&P 500")
+        st.markdown("Proximos reportes de resultados con estimaciones de analistas")
+
+        # Use HEATMAP_TICKERS as source
+        all_tickers = []
+        for sector, tickers in HEATMAP_TICKERS.items():
+            for t in tickers:
+                all_tickers.append(t)
+
+        # Add watchlist tickers
+        try:
+            wl = db.get_tickers()
+            all_tickers = list(set(all_tickers + wl))
+        except:
+            pass
+
+        if st.button("Cargar Calendario de Earnings", key="load_earnings_cal"):
+            progress = st.progress(0)
+            earnings_data = []
+
+            for i, t in enumerate(all_tickers):
+                progress.progress((i + 1) / len(all_tickers))
+                try:
+                    tk = yf.Ticker(t)
+                    info = tk.info
+
+                    # Get earnings date from calendar
+                    cal = tk.calendar
+                    earn_date = None
+                    if isinstance(cal, dict) and "Earnings Date" in cal:
+                        dates = cal["Earnings Date"]
+                        if dates:
+                            earn_date = dates[0] if isinstance(dates, list) else dates
+                    elif isinstance(cal, pd.DataFrame) and "Earnings Date" in cal.index:
+                        earn_date = cal.loc["Earnings Date"].iloc[0]
+
+                    if earn_date is None:
+                        continue
+
+                    # Get earnings estimates
+                    eps_trailing = info.get("trailingEps", None)
+                    eps_forward = info.get("forwardEps", None)
+
+                    earnings_data.append({
+                        "Fecha": earn_date,
+                        "Ticker": t,
+                        "Empresa": (info.get("shortName") or t)[:25],
+                        "Sector": info.get("sector", "N/A"),
+                        "Market Cap": info.get("marketCap", 0),
+                        "EPS Trailing": eps_trailing,
+                        "EPS Forward": eps_forward,
+                        "Precio": info.get("currentPrice") or info.get("regularMarketPrice", 0),
+                    })
+                except:
+                    continue
+
+            progress.empty()
+
+            if earnings_data:
+                df = pd.DataFrame(earnings_data)
+                df["Fecha"] = pd.to_datetime(df["Fecha"])
+                df = df.sort_values("Fecha")
+                st.session_state["earnings_calendar_df"] = df
+            else:
+                st.info("No se encontraron datos de earnings")
+
+        # Display results from session state
+        if "earnings_calendar_df" in st.session_state:
+            df = st.session_state["earnings_calendar_df"]
+
+            # Filter: next 60 days
+            from datetime import datetime, timedelta
+            today = datetime.now()
+            df_upcoming = df[(df["Fecha"] >= today) & (df["Fecha"] <= today + timedelta(days=60))]
+
+            # KPIs
+            this_week = df[(df["Fecha"] >= today) & (df["Fecha"] <= today + timedelta(days=7))]
+            next_week = df[(df["Fecha"] > today + timedelta(days=7)) & (df["Fecha"] <= today + timedelta(days=14))]
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.markdown(kpi("Esta Semana", str(len(this_week)), "empresas", "blue"), unsafe_allow_html=True)
+            k2.markdown(kpi("Proxima Semana", str(len(next_week)), "empresas", "purple"), unsafe_allow_html=True)
+            k3.markdown(kpi("Proximo 60D", str(len(df_upcoming)), "reportes", "green"), unsafe_allow_html=True)
+            if not df_upcoming.empty:
+                next_earn = df_upcoming.iloc[0]
+                k4.markdown(kpi("Proximo", next_earn["Ticker"], str(next_earn["Fecha"].strftime("%d %b")), "red"), unsafe_allow_html=True)
+
+            # Sector filter
+            sectors = df_upcoming["Sector"].unique().tolist()
+            sel_sectors = st.multiselect("Filtrar por sector", sectors, default=sectors, key="earn_sector_filter")
+            df_show = df_upcoming[df_upcoming["Sector"].isin(sel_sectors)] if sel_sectors else df_upcoming
+
+            # Display table
+            display_df = df_show[["Fecha", "Ticker", "Empresa", "Sector", "Precio", "EPS Trailing", "EPS Forward"]].copy()
+            display_df["Fecha"] = display_df["Fecha"].dt.strftime("%Y-%m-%d")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # Timeline scatter chart
+            try:
+                fig = go.Figure()
+                for sector in df_show["Sector"].unique():
+                    sec_df = df_show[df_show["Sector"] == sector]
+                    fig.add_trace(go.Scatter(
+                        x=sec_df["Fecha"], y=sec_df["Sector"],
+                        mode="markers+text", text=sec_df["Ticker"],
+                        textposition="top center", textfont=dict(size=8, color="#94a3b8"),
+                        marker=dict(size=10 + sec_df["Market Cap"].clip(0, 3e12) / 3e11),
+                        name=sector,
+                    ))
+                fig.update_layout(**dark_layout(height=400, showlegend=False,
+                    title=dict(text="Timeline de Earnings", font=dict(color="#94a3b8"))))
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+
+    except Exception as e:
+        st.error(f"Error en el calendario de earnings: {e}")
+
+
+def _render_fund_portfolios():
+    """Institutional fund portfolios from 13F filings."""
+    try:
+        from fund_data import FUND_PORTFOLIOS
+
+        st.markdown("### Fondos Institucionales — Portafolios 13F")
+        st.markdown(
+            "<span style='color:#94a3b8;font-size:13px;'>"
+            "Holdings de los fondos de inversion mas influyentes del mundo</span>",
+            unsafe_allow_html=True,
+        )
+
+        fund_names = list(FUND_PORTFOLIOS.keys())
+        selected = st.selectbox("Seleccionar Fondo", fund_names, key="fund_select")
+        fund = FUND_PORTFOLIOS[selected]
+
+        # Fund info card
+        st.markdown(
+            f"<div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:8px;"
+            f"padding:16px;margin:8px 0;'>"
+            f"<span style='color:#3b82f6;font-size:18px;font-weight:700;'>{selected}</span><br>"
+            f"<span style='color:#94a3b8;'>AUM: {fund['aum']} | Estrategia: {fund['strategy']}</span><br>"
+            f"<span style='color:#475569;font-size:11px;'>Datos: {fund['last_updated']}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Holdings table
+        holdings = fund["holdings"]
+        df = pd.DataFrame(holdings)
+
+        # Style weight column
+        def weight_color(v):
+            if v >= 10:
+                return "background-color: rgba(52,211,153,0.2); color: #34d399; font-weight: 700"
+            if v >= 5:
+                return "background-color: rgba(96,165,250,0.15); color: #60a5fa"
+            return "color: #94a3b8"
+
+        styled = df.style.map(weight_color, subset=["weight"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # Charts: pie + bar side by side
+        c1, c2 = st.columns(2)
+        with c1:
+            sector_agg = df.groupby("sector")["weight"].sum().reset_index()
+            fig_pie = px.pie(
+                sector_agg,
+                values="weight",
+                names="sector",
+                color_discrete_sequence=[
+                    "#3b82f6", "#60a5fa", "#34d399", "#fbbf24",
+                    "#f87171", "#a78bfa", "#f472b6", "#38bdf8",
+                ],
+            )
+            fig_pie.update_layout(
+                **dark_layout(height=350),
+                showlegend=True,
+            )
+            fig_pie.update_traces(textinfo="percent+label", textfont_size=10)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with c2:
+            top10 = df.nlargest(10, "weight")
+            fig_bar = go.Figure(
+                go.Bar(
+                    y=top10["ticker"],
+                    x=top10["weight"],
+                    orientation="h",
+                    marker_color="#3b82f6",
+                    text=[f"{w:.1f}%" for w in top10["weight"]],
+                    textposition="outside",
+                    textfont=dict(color="#94a3b8"),
+                )
+            )
+            fig_bar.update_layout(
+                **dark_layout(
+                    height=350,
+                    title=dict(text="Top 10 Holdings", font=dict(color="#94a3b8")),
+                    xaxis_title="Peso %",
+                )
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # Portfolio overlap
+        try:
+            user_tickers = db.get_tickers()
+            if user_tickers:
+                fund_tickers = [h["ticker"] for h in holdings]
+                overlap = set(user_tickers) & set(fund_tickers)
+                if overlap:
+                    st.success(
+                        f"**Overlap con tu portafolio:** {', '.join(sorted(overlap))} "
+                        f"({len(overlap)} tickers en comun)"
+                    )
+                else:
+                    st.info("Sin overlap con tu portafolio actual")
+        except Exception:
+            pass
+
+        # SEC EDGAR link
+        st.markdown(
+            f"[Ver 13F completo en SEC EDGAR]"
+            f"(https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+            f"&CIK={fund['cik']}&type=13F&dateb=&owner=include&count=10)"
+        )
+
+    except Exception as e:
+        st.error(f"Error al cargar fondos institucionales: {e}")
+
+
 def render():
     st.markdown("""
     <div class='top-header'>
@@ -916,9 +1235,10 @@ def render():
       </div>
     </div>""", unsafe_allow_html=True)
 
-    tab_yf, tab_fvz, tab_heatmap, tab_indices, tab_finder = st.tabs(
+    tab_yf, tab_fvz, tab_heatmap, tab_indices, tab_finder, tab_earnings, tab_funds = st.tabs(
         ["yfinance Screener", "Finviz Screener", "Sector Heatmap",
-         "Indices Globales", "Buscador Avanzado"])
+         "Indices Globales", "Buscador Avanzado", "Earnings Calendar",
+         "Fondos Institucionales"])
 
     with tab_yf:
         _render_yfinance_screener()
@@ -934,3 +1254,9 @@ def render():
 
     with tab_finder:
         _render_security_finder()
+
+    with tab_earnings:
+        _render_earnings_calendar()
+
+    with tab_funds:
+        _render_fund_portfolios()

@@ -7,7 +7,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from ui_shared import DARK, dark_layout, kpi
+from ui_shared import DARK, dark_layout, fmt, kpi
 import ai_engine
 
 # Try FRED
@@ -82,6 +82,201 @@ def _interpret_yield_curve(data):
     return "Datos insuficientes", "#475569"
 
 
+ECONOMIC_CALENDAR_2026 = [
+    # ── CPI Releases (12 months, High impact) ──
+    {"date": "2026-01-14", "event": "CPI Diciembre 2025", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-02-12", "event": "CPI Enero 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-03-11", "event": "CPI Febrero 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-04-10", "event": "CPI Marzo 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-05-13", "event": "CPI Abril 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-06-10", "event": "CPI Mayo 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-07-14", "event": "CPI Junio 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-08-12", "event": "CPI Julio 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-09-11", "event": "CPI Agosto 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-10-13", "event": "CPI Septiembre 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-11-12", "event": "CPI Octubre 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    {"date": "2026-12-10", "event": "CPI Noviembre 2026", "impact": "High", "category": "Inflation", "fred_series": "CPIAUCSL", "source": "BLS"},
+    # ── Non-Farm Payrolls (12 months, High impact) ──
+    {"date": "2026-01-09", "event": "NFP Diciembre 2025", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-02-06", "event": "NFP Enero 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-03-06", "event": "NFP Febrero 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-04-03", "event": "NFP Marzo 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-05-08", "event": "NFP Abril 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-06-05", "event": "NFP Mayo 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-07-02", "event": "NFP Junio 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-08-07", "event": "NFP Julio 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-09-04", "event": "NFP Agosto 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-10-02", "event": "NFP Septiembre 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-11-06", "event": "NFP Octubre 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    {"date": "2026-12-04", "event": "NFP Noviembre 2026", "impact": "High", "category": "Employment", "fred_series": "PAYEMS", "source": "BLS"},
+    # ── FOMC Decisions (8 meetings, High impact) ──
+    {"date": "2026-01-28", "event": "FOMC Decisión Enero", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-03-18", "event": "FOMC Decisión Marzo", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-05-06", "event": "FOMC Decisión Mayo", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-06-17", "event": "FOMC Decisión Junio", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-07-29", "event": "FOMC Decisión Julio", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-09-16", "event": "FOMC Decisión Septiembre", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-11-04", "event": "FOMC Decisión Noviembre", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    {"date": "2026-12-16", "event": "FOMC Decisión Diciembre", "impact": "High", "category": "Fed", "fred_series": "FEDFUNDS", "source": "Federal Reserve"},
+    # ── GDP Releases (4 advance + 4 preliminary, High impact) ──
+    {"date": "2026-01-29", "event": "GDP Q4 2025 Advance", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-02-26", "event": "GDP Q4 2025 Preliminary", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-04-29", "event": "GDP Q1 2026 Advance", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-05-28", "event": "GDP Q1 2026 Preliminary", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-07-30", "event": "GDP Q2 2026 Advance", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-08-27", "event": "GDP Q2 2026 Preliminary", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-10-29", "event": "GDP Q3 2026 Advance", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    {"date": "2026-11-25", "event": "GDP Q3 2026 Preliminary", "impact": "High", "category": "Growth", "fred_series": "GDP", "source": "BEA"},
+    # ── PPI Releases (12 months, Medium impact) ──
+    {"date": "2026-01-15", "event": "PPI Diciembre 2025", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-02-13", "event": "PPI Enero 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-03-12", "event": "PPI Febrero 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-04-09", "event": "PPI Marzo 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-05-14", "event": "PPI Abril 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-06-11", "event": "PPI Mayo 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-07-15", "event": "PPI Junio 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-08-13", "event": "PPI Julio 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-09-14", "event": "PPI Agosto 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-10-14", "event": "PPI Septiembre 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-11-13", "event": "PPI Octubre 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    {"date": "2026-12-11", "event": "PPI Noviembre 2026", "impact": "Medium", "category": "Inflation", "fred_series": "PPIACO", "source": "BLS"},
+    # ── ISM Manufacturing (6 selected months, Medium impact) ──
+    {"date": "2026-01-05", "event": "ISM Manufactura Diciembre", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    {"date": "2026-03-02", "event": "ISM Manufactura Febrero", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    {"date": "2026-05-01", "event": "ISM Manufactura Abril", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    {"date": "2026-07-01", "event": "ISM Manufactura Junio", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    {"date": "2026-09-01", "event": "ISM Manufactura Agosto", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    {"date": "2026-11-02", "event": "ISM Manufactura Octubre", "impact": "Medium", "category": "Manufacturing", "fred_series": None, "source": "ISM"},
+    # ── Retail Sales (6 selected months, Medium impact) ──
+    {"date": "2026-01-16", "event": "Ventas Minoristas Diciembre", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    {"date": "2026-03-17", "event": "Ventas Minoristas Febrero", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    {"date": "2026-05-15", "event": "Ventas Minoristas Abril", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    {"date": "2026-07-16", "event": "Ventas Minoristas Junio", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    {"date": "2026-09-16", "event": "Ventas Minoristas Agosto", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    {"date": "2026-11-17", "event": "Ventas Minoristas Octubre", "impact": "Medium", "category": "Consumer", "fred_series": "RSAFS", "source": "BLS"},
+    # ── Consumer Confidence (6 selected months, Medium impact) ──
+    {"date": "2026-01-27", "event": "Confianza Consumidor Enero", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+    {"date": "2026-03-31", "event": "Confianza Consumidor Marzo", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+    {"date": "2026-05-26", "event": "Confianza Consumidor Mayo", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+    {"date": "2026-07-28", "event": "Confianza Consumidor Julio", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+    {"date": "2026-09-29", "event": "Confianza Consumidor Septiembre", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+    {"date": "2026-11-24", "event": "Confianza Consumidor Noviembre", "impact": "Medium", "category": "Consumer", "fred_series": None, "source": "Conference Board"},
+]
+
+
+def _render_economic_calendar(fred):
+    """Render the Economic Calendar tab with upcoming macro events."""
+    from datetime import datetime, timedelta
+
+    st.markdown("### Calendario Econ\u00f3mico 2026")
+    st.markdown("Eventos macro que mueven los mercados")
+
+    today = datetime.now().date()
+    week_end = today + timedelta(days=7)
+
+    cal_df = pd.DataFrame(ECONOMIC_CALENDAR_2026)
+    cal_df["date"] = pd.to_datetime(cal_df["date"]).dt.date
+    cal_df = cal_df.sort_values("date")
+
+    # Status column
+    def get_status(d):
+        if d < today:
+            return "Pasado"
+        if d <= week_end:
+            return "Esta Semana"
+        return "Pr\u00f3ximo"
+
+    cal_df["status"] = cal_df["date"].apply(get_status)
+
+    # KPIs
+    upcoming = cal_df[cal_df["date"] >= today]
+    this_week = cal_df[(cal_df["date"] >= today) & (cal_df["date"] <= week_end)]
+    high_upcoming = upcoming[upcoming["impact"] == "High"]
+
+    k1, k2, k3 = st.columns(3)
+    k1.markdown(kpi(
+        "Pr\u00f3ximo Evento",
+        upcoming.iloc[0]["event"][:20] if not upcoming.empty else "N/A",
+        str(upcoming.iloc[0]["date"]) if not upcoming.empty else "",
+        "blue"
+    ), unsafe_allow_html=True)
+    k2.markdown(kpi(
+        "Esta Semana",
+        str(len(this_week)),
+        "eventos",
+        "purple"
+    ), unsafe_allow_html=True)
+    k3.markdown(kpi(
+        "High Impact Pendiente",
+        str(len(high_upcoming)),
+        "eventos",
+        "red"
+    ), unsafe_allow_html=True)
+
+    # Filters
+    fc1, fc2 = st.columns(2)
+    impact_sel = fc1.multiselect(
+        "Impacto", ["High", "Medium", "Low"],
+        default=["High", "Medium"], key="cal_impact"
+    )
+    cats = cal_df["category"].unique().tolist()
+    cat_sel = fc2.multiselect(
+        "Categor\u00eda", cats, default=cats, key="cal_cat"
+    )
+
+    filtered = cal_df[
+        (cal_df["impact"].isin(impact_sel)) & (cal_df["category"].isin(cat_sel))
+    ]
+
+    # Status styling function
+    def status_style(v):
+        if v == "Pasado":
+            return "color: #475569"
+        if v == "Esta Semana":
+            return "background-color: rgba(251,191,36,0.15); color: #fbbf24; font-weight: 600"
+        return "color: #e2e8f0"
+
+    display = filtered[["date", "event", "category", "impact", "status", "source"]].copy()
+    display.columns = ["Fecha", "Evento", "Categor\u00eda", "Impacto", "Estado", "Fuente"]
+
+    styled = display.style.applymap(status_style, subset=["Estado"])
+    st.dataframe(styled, use_container_width=True, hide_index=True, height=400)
+
+    # Historical context
+    st.markdown("---")
+    st.markdown("**Contexto Hist\u00f3rico**")
+    fred_events = filtered[filtered["fred_series"].notna()]["event"].unique().tolist()
+    if fred_events and fred:
+        selected_event = st.selectbox(
+            "Ver serie hist\u00f3rica", [""] + fred_events, key="cal_hist"
+        )
+        if selected_event:
+            evt_row = filtered[filtered["event"] == selected_event].iloc[0]
+            series_id = evt_row["fred_series"]
+            try:
+                hist = fred.get_series(
+                    series_id,
+                    observation_start=datetime.now() - timedelta(days=365 * 3)
+                )
+                if hist is not None and not hist.empty:
+                    fig = go.Figure(go.Scatter(
+                        x=hist.index, y=hist.values, mode="lines",
+                        line=dict(color="#3b82f6", width=2)
+                    ))
+                    fig.update_layout(**dark_layout(
+                        height=300,
+                        title=dict(
+                            text=f"{series_id} \u2014 \u00daltimos 3 a\u00f1os",
+                            font=dict(color="#94a3b8")
+                        )
+                    ))
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"No se pudo cargar {series_id}: {e}")
+    elif not fred:
+        st.info("Conecta tu API key de FRED para ver series hist\u00f3ricas de cada evento.")
+
+
 def render():
     st.markdown("""
     <div class='top-header'>
@@ -110,7 +305,7 @@ def render():
           y agrégala en <code>.streamlit/secrets.toml</code>
         </div>""", unsafe_allow_html=True)
 
-    tab_yield, tab_macro, tab_vix, tab_fx = st.tabs(["📈 Yield Curve", "📊 Indicadores Macro", "😰 VIX & Sentimiento", "💱 Monitor de Divisas"])
+    tab_yield, tab_macro, tab_vix, tab_fx, tab_cal = st.tabs(["📈 Yield Curve", "📊 Indicadores Macro", "😰 VIX & Sentimiento", "💱 Monitor de Divisas", "📅 Calendario Económico"])
 
     # ══════════════════════════════════════════════════════════════
     # TAB 1: YIELD CURVE
@@ -458,3 +653,9 @@ def render():
                 st.warning("No se pudieron obtener datos de divisas.")
         except Exception as _e_fx:
             st.warning(f"Error en monitor de divisas: {_e_fx}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 5: CALENDARIO ECONÓMICO
+    # ══════════════════════════════════════════════════════════════
+    with tab_cal:
+        _render_economic_calendar(fred)

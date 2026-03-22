@@ -176,15 +176,23 @@ class SmartScorer:
             return {}
 
 
-# Singleton instances
-_quality = None
-_anomaly = None
-_scorer = None
+# Singleton instances with Streamlit cache
+try:
+    import streamlit as _st
 
+    @_st.cache_resource
+    def get_models():
+        if not HAS_SKLEARN:
+            return None, None, None
+        return QualityClassifier(), AnomalyDetector(), SmartScorer()
+except ImportError:
+    # Fallback without Streamlit (testing, CLI)
+    _quality = None
+    _anomaly = None
+    _scorer = None
 
-def get_models():
-    global _quality, _anomaly, _scorer
-    try:
+    def get_models():
+        global _quality, _anomaly, _scorer
         if not HAS_SKLEARN:
             return None, None, None
         if _quality is None:
@@ -192,8 +200,6 @@ def get_models():
             _anomaly = AnomalyDetector()
             _scorer = SmartScorer()
         return _quality, _anomaly, _scorer
-    except Exception:
-        return None, None, None
 
 
 def train_models(progress_callback=None):

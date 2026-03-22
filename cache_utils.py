@@ -65,3 +65,19 @@ def get_dividends(ticker: str) -> pd.Series:
         return yf.Ticker(ticker).dividends
     except:
         return pd.Series()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_capital_returns(ticker):
+    from valuation import compute_capital_returns
+    try:
+        return compute_capital_returns(ticker)
+    except:
+        return {}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_health_scores(ticker):
+    from valuation import compute_health_scores
+    try:
+        return compute_health_scores(ticker)
+    except:
+        return {}
