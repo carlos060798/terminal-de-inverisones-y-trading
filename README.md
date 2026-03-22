@@ -1,46 +1,42 @@
-# 📈 Investment Command Center
-
-Dashboard privado de inversiones — 100% local, sin suscripciones.
-
-## Instalación rápida
-
-### 1. Requisitos
-- Python 3.9 o superior → https://www.python.org/downloads/
-
-### 2. Instalar dependencias
-Abre una terminal en la carpeta del proyecto y ejecuta:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Lanzar la app
-```bash
-streamlit run app.py
-```
-
-Se abrirá automáticamente en tu navegador en: **http://localhost:8501**
-
 ---
+title: Quantum Retail Terminal
+emoji: 💎
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.44.1"
+app_file: app.py
+pinned: true
+---
+
+# 💎 Quantum Retail Terminal — Pro Edition
+
+Terminal institucional de inversiones para retail — Streamlit + SQLite + yfinance. 100% gratis.
 
 ## Secciones
 
-| Sección | Qué hace |
+| Sección | Funcionalidades |
 |---|---|
-| 📄 Analizador de Acciones | Sube PDFs financieros y extrae métricas automáticamente. Compara contra umbrales ideales y genera un radar de puntuación. |
-| 👁️ Watchlist & Cartera | Agrega tickers, obtiene precios en tiempo real vía yfinance, muestra gráficos de distribución y candlestick con MA20/MA50. |
-| 📓 Diario de Trading | Registra operaciones, calcula P&L automáticamente, curva de equity, win rate y factor de beneficio. |
+| 🏠 Dashboard | KPIs de cartera, P&L, Sharpe, Sortino, VaR, Drawdown |
+| 📄 Acciones | PDF parser, Fair Value, Health Scores, TradingView charts, AI analysis |
+| 🔍 Screener | Filtros fundamentales, Sector Heatmap, Multi-Factor Quant Score |
+| 🎯 Tesis | MOAT analysis, Porter 5 Forces, Bull/Bear thesis |
+| 👁️ Watchlist | Cartera en tiempo real, Correlación, Monte Carlo, Efficient Frontier |
+| 📓 Diario | Trading journal con psicología, win rate, equity curve |
+| 💱 Forex | Multi-instrumento: FX, Indices, Commodities, Crypto |
+| 📊 Macro | Yield curve, FRED data, economic indicators |
+| 📉 Backtest | SMA Crossover, RSI strategies con equity curves |
+| ⚙️ Sistema | API health, DB stats, diagnostics |
 
-## Métricas Ideales (Manual Definitivo de Inversión)
+## Stack
+- **Frontend**: Streamlit + TradingView widgets + Plotly + Ant Design
+- **Data**: yfinance, FRED API, Finviz
+- **AI**: Gemini + Groq + OpenRouter (fallback chain)
+- **DB**: SQLite (persistent)
+- **Export**: Excel (openpyxl) + PDF (fpdf2)
 
-| Métrica | Umbral |
-|---|---|
-| Crecimiento de Ingresos | ≥ 10% |
-| Margen de Beneficio Neto | ≥ 15% |
-| ROE | ≥ 15% |
-| Ratio Corriente | ≥ 1.5x |
-| P/E Ratio | ≤ 25x |
-| Deuda / Patrimonio | ≤ 1.0x |
-
-## Datos
-Los datos se guardan en `investment_data.db` (SQLite) — no se pierden al cerrar la app.
+## Local Setup
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
