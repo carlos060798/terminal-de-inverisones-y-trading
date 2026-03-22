@@ -30,7 +30,7 @@ POPULAR = {
 def _render_yfinance_screener():
     """Original yfinance-based screener content."""
     # ── INPUT: Tickers ──
-    st.markdown("<div class='sec-title'>Selección de Acciones</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sec-title'>Seleccion de Acciones</div>", unsafe_allow_html=True)
     tc1, tc2 = st.columns([2, 1])
 
     with tc1:
@@ -46,16 +46,38 @@ def _render_yfinance_screener():
     # ── FILTERS ──
     with st.expander("Filtros fundamentales"):
         fc1, fc2, fc3, fc4 = st.columns(4)
-        pe_max = fc1.number_input("P/E máximo", min_value=0.0, value=30.0, step=5.0)
-        roe_min = fc2.number_input("ROE mínimo (%)", min_value=0.0, value=10.0, step=5.0)
-        margin_min = fc3.number_input("Margen neto mín (%)", min_value=0.0, value=5.0, step=5.0)
-        mcap_min = fc4.selectbox("Market Cap mín", ["Sin filtro", ">$1B", ">$10B", ">$100B", ">$1T"])
+        pe_max = fc1.number_input("P/E maximo", min_value=0.0, value=30.0, step=5.0)
+        roe_min = fc2.number_input("ROE minimo (%)", min_value=0.0, value=10.0, step=5.0)
+        margin_min = fc3.number_input("Margen neto min (%)", min_value=0.0, value=5.0, step=5.0)
+        mcap_min = fc4.selectbox("Market Cap min", ["Sin filtro", ">$1B", ">$10B", ">$100B", ">$1T"])
 
         fc5, fc6, fc7, fc8 = st.columns(4)
-        de_max = fc5.number_input("Deuda/Equity máx", min_value=0.0, value=2.0, step=0.5)
-        div_min = fc6.number_input("Div Yield mín (%)", min_value=0.0, value=0.0, step=0.5)
-        peg_max = fc7.number_input("PEG máximo", min_value=0.0, value=3.0, step=0.5)
-        beta_max = fc8.number_input("Beta máximo", min_value=0.0, value=3.0, step=0.5)
+        de_max = fc5.number_input("Deuda/Equity max", min_value=0.0, value=2.0, step=0.5)
+        div_min = fc6.number_input("Div Yield min (%)", min_value=0.0, value=0.0, step=0.5)
+        peg_max = fc7.number_input("PEG maximo", min_value=0.0, value=3.0, step=0.5)
+        beta_max = fc8.number_input("Beta maximo", min_value=0.0, value=3.0, step=0.5)
+
+        # ── Extended filters ──
+        st.markdown("---")
+        st.markdown("<span style='color:#94a3b8;font-size:13px;font-weight:600;'>Filtros Avanzados</span>",
+                    unsafe_allow_html=True)
+
+        ef1, ef2, ef3, ef4 = st.columns(4)
+        _mcap_labels = ["Micro (<$300M)", "Small ($300M-$2B)", "Mid ($2B-$10B)",
+                        "Large ($10B-$200B)", "Mega (>$200B)"]
+        mcap_range = ef1.select_slider(
+            "Rango Market Cap",
+            options=_mcap_labels,
+            value=(_mcap_labels[0], _mcap_labels[-1]),
+            key="yf_mcap_range",
+        )
+        rev_growth_min = ef2.number_input("Crec. Ingresos min (%)", min_value=-100.0, value=0.0,
+                                           step=5.0, key="yf_rev_growth_min")
+        beta_min = ef3.number_input("Beta minimo", min_value=0.0, value=0.0, step=0.1,
+                                     key="yf_beta_min")
+        vol_min = ef4.number_input("Volumen promedio min", min_value=0, value=0,
+                                    step=100000, key="yf_vol_min",
+                                    help="Volumen promedio minimo de negociacion diaria")
 
         fc9, fc10 = st.columns(2)
         sector_filter = fc9.multiselect(
@@ -67,7 +89,7 @@ def _render_yfinance_screener():
             key="yf_sector_filter",
         )
         country_filter = fc10.text_input(
-            "Filtrar por País", value="", placeholder="ej: United States",
+            "Filtrar por Pais", value="", placeholder="ej: United States",
             key="yf_country_filter",
         )
 
@@ -77,7 +99,7 @@ def _render_yfinance_screener():
             st.warning("Ingresa al menos un ticker.")
             return
 
-        with st.spinner(f"Escaneando {len(tickers)} acciones…"):
+        with st.spinner(f"Escaneando {len(tickers)} acciones..."):
             results = []
             progress = st.progress(0)
 
@@ -101,6 +123,7 @@ def _render_yfinance_screener():
                     beta = info.get("beta")
                     rev_growth = (info.get("revenueGrowth") or 0) * 100
                     earn_growth = (info.get("earningsGrowth") or 0) * 100
+                    avg_volume = info.get("averageVolume") or info.get("averageDailyVolume10Day") or 0
                     sector = info.get("sector", "")
                     country = info.get("country", "")
                     name = info.get("shortName", ticker)
@@ -125,6 +148,35 @@ def _render_yfinance_screener():
                     if mcap_min != "Sin filtro" and mcap < mcap_thresholds.get(mcap_min, 0):
                         continue
 
+                    # ── Extended filters ──
+                    # Market Cap range filter
+                    _mcap_bounds = {
+                        "Micro (<$300M)": (0, 3e8),
+                        "Small ($300M-$2B)": (3e8, 2e9),
+                        "Mid ($2B-$10B)": (2e9, 1e10),
+                        "Large ($10B-$200B)": (1e10, 2e11),
+                        "Mega (>$200B)": (2e11, float("inf")),
+                    }
+                    try:
+                        _range_lo = _mcap_bounds[mcap_range[0]][0]
+                        _range_hi = _mcap_bounds[mcap_range[1]][1]
+                        if mcap and (mcap < _range_lo or mcap > _range_hi):
+                            continue
+                    except Exception:
+                        pass
+
+                    # Revenue growth min
+                    if rev_growth_min and rev_growth < rev_growth_min:
+                        continue
+
+                    # Beta min
+                    if beta_min and beta is not None and beta < beta_min:
+                        continue
+
+                    # Average volume min
+                    if vol_min and avg_volume < vol_min:
+                        continue
+
                     # Score (simple scoring: count how many criteria are "good")
                     score = 0
                     if pe and pe < 20: score += 1
@@ -136,13 +188,13 @@ def _render_yfinance_screener():
 
                     results.append({
                         "Ticker": ticker, "Empresa": name[:25], "Sector": sector,
-                        "País": country,
+                        "Pais": country,
                         "Precio": price, "P/E": pe, "P/E Fwd": pe_fwd,
                         "ROE %": round(roe, 1), "Margen %": round(margin, 1),
                         "D/E": round(de, 2), "PEG": peg, "Beta": beta,
                         "Div %": round(div_y, 2), "Crec Rev %": round(rev_growth, 1),
                         "Crec Earn %": round(earn_growth, 1),
-                        "Mkt Cap": mcap, "Score": score,
+                        "Mkt Cap": mcap, "Vol Prom": avg_volume, "Score": score,
                     })
                 except Exception:
                     continue
@@ -154,10 +206,10 @@ def _render_yfinance_screener():
             results = [r for r in results if r.get("Sector", "") in sector_filter]
         if results and country_filter.strip():
             cf_lower = country_filter.strip().lower()
-            results = [r for r in results if cf_lower in r.get("País", "").lower()]
+            results = [r for r in results if cf_lower in r.get("Pais", "").lower()]
 
         if not results:
-            st.warning("Ninguna acción pasó los filtros. Intenta con criterios más amplios.")
+            st.warning("Ninguna accion paso los filtros. Intenta con criterios mas amplios.")
             return
 
         df = pd.DataFrame(results).sort_values("Score", ascending=False)
@@ -208,7 +260,7 @@ def _render_yfinance_screener():
         k1, k2, k3 = st.columns(3)
         k1.markdown(kpi("Acciones encontradas", str(len(df)), "", "blue"), unsafe_allow_html=True)
         avg_pe = df["P/E"].dropna().mean()
-        k2.markdown(kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "—", "", "purple"), unsafe_allow_html=True)
+        k2.markdown(kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "--", "", "purple"), unsafe_allow_html=True)
         avg_roe = df["ROE %"].mean()
         k3.markdown(kpi("ROE Promedio", f"{avg_roe:.1f}%", "", "green"), unsafe_allow_html=True)
 
@@ -232,8 +284,9 @@ def _render_yfinance_screener():
                 return "background-color: rgba(251,191,36,0.15); color: #fbbf24"
             return "background-color: rgba(248,113,113,0.15); color: #f87171"
 
-        display_cols = ["Ticker", "Empresa", "Sector", "País", "Precio", "P/E", "P/E Fwd",
-                        "ROE %", "Margen %", "D/E", "PEG", "Div %", "Crec Rev %", "Score", "Quant"]
+        display_cols = ["Ticker", "Empresa", "Sector", "Pais", "Precio", "P/E", "P/E Fwd",
+                        "ROE %", "Margen %", "D/E", "PEG", "Beta", "Div %", "Crec Rev %",
+                        "Vol Prom", "Score", "Quant"]
         available_cols = [c for c in display_cols if c in df.columns]
         df_show = df[available_cols].copy()
 
@@ -243,13 +296,16 @@ def _render_yfinance_screener():
 
         st.dataframe(
             style_obj.format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
-                            "D/E": "{:.2f}", "PEG": "{:.2f}", "Div %": "{:.2f}%"},
-                            na_rep="—"),
+                            "D/E": "{:.2f}", "PEG": "{:.2f}", "Beta": "{:.2f}",
+                            "Div %": "{:.2f}%",
+                            "Vol Prom": lambda v: f"{v/1e6:.1f}M" if v and v > 1e6
+                                        else (f"{v/1e3:.0f}K" if v and v > 1e3 else "--")},
+                            na_rep="--"),
             use_container_width=True, hide_index=True
         )
 
         # ── COMPARISON CHARTS ──
-        st.markdown("<div class='sec-title'>Comparación Visual</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sec-title'>Comparacion Visual</div>", unsafe_allow_html=True)
         vc1, vc2 = st.columns(2)
 
         with vc1:
@@ -258,7 +314,7 @@ def _render_yfinance_screener():
                 x=df["Ticker"], y=df["P/E"].fillna(0),
                 marker_color=["#34d399" if (v or 99) < 20 else "#fbbf24" if (v or 99) < 30 else "#f87171"
                                for v in df["P/E"]],
-                text=[f"{v:.1f}" if pd.notna(v) else "—" for v in df["P/E"]],
+                text=[f"{v:.1f}" if pd.notna(v) else "--" for v in df["P/E"]],
                 textposition="outside", textfont=dict(color="#94a3b8", size=9),
             ))
             fig_pe.add_hline(y=20, line_dash="dot", line_color="#fbbf24", annotation_text="P/E 20")
@@ -296,8 +352,8 @@ def _render_finviz_screener():
     """Finviz-based screener for faster bulk screening."""
     if not HAS_FINVIZ:
         st.warning(
-            "El paquete `finvizfinance` no está instalado. "
-            "Instálalo con: `pip install finvizfinance`"
+            "El paquete `finvizfinance` no esta instalado. "
+            "Instalalo con: `pip install finvizfinance`"
         )
         return
 
@@ -353,7 +409,7 @@ def _render_finviz_screener():
                 df = foverview.screener_view()
 
             if df is None or df.empty:
-                st.warning("Finviz no devolvió resultados para estos filtros.")
+                st.warning("Finviz no devolvio resultados para estos filtros.")
                 return
 
             st.session_state["finviz_results"] = df
@@ -374,21 +430,21 @@ def _render_finviz_screener():
             pe_col = pd.to_numeric(df["P/E"], errors="coerce")
             avg_pe = pe_col.dropna().mean()
             k2.markdown(
-                kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "—", "", "purple"),
+                kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "--", "", "purple"),
                 unsafe_allow_html=True,
             )
         else:
-            k2.markdown(kpi("P/E Promedio", "—", "", "purple"), unsafe_allow_html=True)
+            k2.markdown(kpi("P/E Promedio", "--", "", "purple"), unsafe_allow_html=True)
 
         if "Price" in df.columns:
             price_col = pd.to_numeric(df["Price"], errors="coerce")
             avg_price = price_col.dropna().mean()
             k3.markdown(
-                kpi("Precio Promedio", f"${avg_price:.2f}" if pd.notna(avg_price) else "—", "", "green"),
+                kpi("Precio Promedio", f"${avg_price:.2f}" if pd.notna(avg_price) else "--", "", "green"),
                 unsafe_allow_html=True,
             )
         else:
-            k3.markdown(kpi("Precio Promedio", "—", "", "green"), unsafe_allow_html=True)
+            k3.markdown(kpi("Precio Promedio", "--", "", "green"), unsafe_allow_html=True)
 
         st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -428,30 +484,60 @@ def _render_finviz_screener():
                     fig_heat.update_traces(textposition="outside", textfont=dict(color="#94a3b8", size=10))
                     st.plotly_chart(fig_heat, use_container_width=True)
                 else:
-                    st.info("No hay datos numéricos de P/E para generar el heatmap.")
+                    st.info("No hay datos numericos de P/E para generar el heatmap.")
             except Exception as e:
                 st.warning(f"No se pudo generar el heatmap: {e}")
 
 
+# ── Top 100 S&P 500 by market cap, organized by 11 GICS sectors ──
 HEATMAP_TICKERS = {
-    "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN"],
-    "Healthcare": ["JNJ", "UNH", "PFE", "LLY", "ABBV", "MRK"],
-    "Finance": ["JPM", "BAC", "GS", "V", "MA", "BRK-B"],
-    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC"],
-    "Consumer": ["WMT", "PG", "KO", "PEP", "COST", "MCD"],
-    "Industrial": ["CAT", "HON", "UNP", "RTX", "DE", "GE"],
+    "Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "ADBE", "AMD", "CSCO", "INTC", "IBM", "QCOM", "TXN", "NOW", "INTU"],
+    "Communication": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "TMUS", "VZ", "T", "EA", "WBD"],
+    "Consumer Disc.": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "TJX", "BKNG", "MAR"],
+    "Consumer Staples": ["WMT", "PG", "COST", "KO", "PEP", "PM", "MO", "CL", "MDLZ", "KHC"],
+    "Healthcare": ["UNH", "JNJ", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY", "AMGN", "GILD", "ISRG", "CVS", "ELV"],
+    "Financials": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "BLK", "AXP", "SCHW", "C", "CB"],
+    "Industrials": ["GE", "CAT", "RTX", "HON", "UNP", "BA", "DE", "LMT", "UPS", "ADP", "GD", "MMM", "ITW"],
+    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL"],
+    "Utilities": ["NEE", "DUK", "SO", "D", "AEP", "SRE", "EXC", "XEL", "WEC", "ES"],
+    "Real Estate": ["PLD", "AMT", "EQIX", "CCI", "PSA", "SPG", "O", "WELL", "DLR", "AVB"],
+    "Materials": ["LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DD", "VMC", "MLM"],
+}
+
+# ── Global indices & ETFs organized by region ──
+GLOBAL_INDICES = {
+    "US": {
+        "S&P 500": "^GSPC", "Nasdaq 100": "^NDX", "Dow Jones": "^DJI",
+        "Russell 2000": "^RUT", "S&P MidCap": "^MID", "VIX": "^VIX",
+    },
+    "Europa": {
+        "FTSE 100": "^FTSE", "DAX": "^GDAXI", "CAC 40": "^FCHI",
+        "Euro Stoxx 50": "^STOXX50E", "IBEX 35": "^IBEX",
+    },
+    "Asia": {
+        "Nikkei 225": "^N225", "Hang Seng": "^HSI", "Shanghai": "000001.SS",
+        "KOSPI": "^KS11", "Sensex": "^BSESN",
+    },
+    "Americas": {
+        "Bovespa": "^BVSP", "S&P/TSX": "^GSPTSE", "IPC Mexico": "^MXX",
+    },
+    "ETFs Populares": {
+        "SPY": "SPY", "QQQ": "QQQ", "IWM": "IWM",
+        "EEM": "EEM", "GLD": "GLD", "TLT": "TLT",
+    },
 }
 
 
 def _render_sector_heatmap():
     """FinViz-style sector heatmap using treemap colored by daily change %."""
     try:
-        st.markdown("<div class='sec-title'>Sector Heatmap — Cambio Diario %</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sec-title'>Sector Heatmap -- Top 100 S&P 500 -- Cambio Diario %</div>", unsafe_allow_html=True)
         st.markdown("""
         <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
                     border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
-          Mapa de calor estilo FinViz. El tamaño representa la capitalización de mercado relativa.
-          El color indica el cambio porcentual del día: <span style='color:#34d399'>verde = positivo</span>,
+          Mapa de calor estilo FinViz con las <b>Top 100 acciones del S&amp;P 500</b> organizadas por los 11 sectores GICS.
+          El tamano representa la capitalizacion de mercado relativa.
+          El color indica el cambio porcentual del dia: <span style='color:#34d399'>verde = positivo</span>,
           <span style='color:#f87171'>rojo = negativo</span>.
         </div>""", unsafe_allow_html=True)
 
@@ -464,7 +550,7 @@ def _render_sector_heatmap():
                     all_tickers.append(t)
                     ticker_sector[t] = sector
 
-            with st.spinner(f"Descargando datos de {len(all_tickers)} acciones…"):
+            with st.spinner(f"Descargando datos de {len(all_tickers)} acciones..."):
                 hm_rows = []
                 for tk in all_tickers:
                     try:
@@ -516,8 +602,8 @@ def _render_sector_heatmap():
                 plot_bgcolor="#0a0a0a",
                 font=dict(color="#94a3b8", size=12),
                 margin=dict(l=4, r=4, t=36, b=4),
-                height=550,
-                title=dict(text="Sector Heatmap — Cambio Diario", font=dict(color="#94a3b8", size=14), x=0.5),
+                height=650,
+                title=dict(text="Sector Heatmap -- Top 100 S&P 500 -- Cambio Diario", font=dict(color="#94a3b8", size=14), x=0.5),
                 coloraxis_colorbar=dict(
                     title="Cambio %",
                     ticksuffix="%",
@@ -552,8 +638,153 @@ def _render_sector_heatmap():
         st.error(f"Error al generar el heatmap: {e}")
 
 
+def _render_global_indices():
+    """Global indices monitor with multi-period performance."""
+    try:
+        st.markdown("<div class='sec-title'>Indices Globales -- Monitor en Tiempo Real</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
+                    border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
+          Monitor de indices bursatiles globales y ETFs populares.
+          Cambios calculados sobre precios de cierre. <span style='color:#34d399'>Verde = positivo</span>,
+          <span style='color:#f87171'>Rojo = negativo</span>.
+        </div>""", unsafe_allow_html=True)
+
+        if st.button("Cargar Indices Globales", type="primary", key="indices_btn"):
+            from datetime import datetime
+
+            all_symbols = {}
+            symbol_region = {}
+            for region, indices in GLOBAL_INDICES.items():
+                for name, symbol in indices.items():
+                    all_symbols[name] = symbol
+                    symbol_region[name] = region
+
+            with st.spinner(f"Descargando datos de {len(all_symbols)} indices..."):
+                rows = []
+                for name, symbol in all_symbols.items():
+                    try:
+                        tk = yf.Ticker(symbol)
+                        hist = tk.history(period="6mo")
+                        if hist.empty or len(hist) < 2:
+                            continue
+
+                        current = hist["Close"].iloc[-1]
+                        prev_close = hist["Close"].iloc[-2]
+                        daily_chg = ((current - prev_close) / prev_close * 100) if prev_close else 0
+
+                        # 1W change
+                        week_ago_idx = max(0, len(hist) - 6)
+                        week_price = hist["Close"].iloc[week_ago_idx]
+                        week_chg = ((current - week_price) / week_price * 100) if week_price else 0
+
+                        # 1M change
+                        month_ago_idx = max(0, len(hist) - 22)
+                        month_price = hist["Close"].iloc[month_ago_idx]
+                        month_chg = ((current - month_price) / month_price * 100) if month_price else 0
+
+                        # YTD change
+                        current_year = datetime.now().year
+                        ytd_data = hist[hist.index.year == current_year]
+                        if len(ytd_data) > 1:
+                            ytd_start = ytd_data["Close"].iloc[0]
+                            ytd_chg = ((current - ytd_start) / ytd_start * 100) if ytd_start else 0
+                        else:
+                            ytd_chg = 0
+
+                        rows.append({
+                            "Region": symbol_region[name],
+                            "Indice": name,
+                            "Simbolo": symbol,
+                            "Precio": round(current, 2),
+                            "Dia %": round(daily_chg, 2),
+                            "1S %": round(week_chg, 2),
+                            "1M %": round(month_chg, 2),
+                            "YTD %": round(ytd_chg, 2),
+                        })
+                    except Exception:
+                        continue
+
+            if not rows:
+                st.warning("No se pudieron obtener datos de los indices.")
+                return
+
+            idx_df = pd.DataFrame(rows)
+            st.session_state["global_indices_df"] = idx_df
+
+        if "global_indices_df" not in st.session_state:
+            return
+
+        idx_df = st.session_state["global_indices_df"]
+
+        def _chg_color(v):
+            if isinstance(v, (int, float)) and not pd.isna(v):
+                if v > 0:
+                    return "background-color: rgba(52,211,153,0.12); color: #34d399; font-weight: 600"
+                elif v < 0:
+                    return "background-color: rgba(248,113,113,0.12); color: #f87171; font-weight: 600"
+            return "color: #64748b"
+
+        chg_cols = ["Dia %", "1S %", "1M %", "YTD %"]
+
+        for region in ["US", "Europa", "Asia", "Americas", "ETFs Populares"]:
+            region_df = idx_df[idx_df["Region"] == region].copy()
+            if region_df.empty:
+                continue
+
+            region_labels = {
+                "US": "US",
+                "Europa": "Europa",
+                "Asia": "Asia-Pacifico",
+                "Americas": "Latinoamerica & Canada",
+                "ETFs Populares": "ETFs Populares",
+            }
+            label = region_labels.get(region, region)
+            st.markdown(
+                f"<div style='margin:18px 0 8px 0;font-size:16px;font-weight:700;color:#e2e8f0;'>"
+                f"{label}</div>",
+                unsafe_allow_html=True,
+            )
+
+            display_df = region_df[["Indice", "Precio", "Dia %", "1S %", "1M %", "YTD %"]].copy()
+            styled = display_df.style.map(_chg_color, subset=chg_cols).format({
+                "Precio": "{:,.2f}",
+                "Dia %": "{:+.2f}%",
+                "1S %": "{:+.2f}%",
+                "1M %": "{:+.2f}%",
+                "YTD %": "{:+.2f}%",
+            })
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # Summary bar chart: YTD performance
+        st.markdown("<div class='sec-title'>Rendimiento YTD -- Todos los Indices</div>", unsafe_allow_html=True)
+        chart_df = idx_df.sort_values("YTD %", ascending=True).copy()
+        colors = ["#34d399" if v >= 0 else "#f87171" for v in chart_df["YTD %"]]
+        fig_ytd = go.Figure()
+        fig_ytd.add_trace(go.Bar(
+            y=chart_df["Indice"],
+            x=chart_df["YTD %"],
+            orientation="h",
+            marker_color=colors,
+            text=[f"{v:+.1f}%" for v in chart_df["YTD %"]],
+            textposition="outside",
+            textfont=dict(color="#94a3b8", size=10),
+        ))
+        fig_ytd.update_layout(
+            **DARK,
+            height=max(400, len(chart_df) * 28),
+            title=dict(text="YTD Performance (%)", font=dict(color="#94a3b8", size=14), x=0.5),
+            showlegend=False,
+            xaxis=dict(title="YTD %", ticksuffix="%"),
+        )
+        st.plotly_chart(fig_ytd, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error al cargar indices globales: {e}")
+
+
 def _render_security_finder():
-    """Advanced security finder — search by company name or partial ticker."""
+    """Advanced security finder -- search by company name or partial ticker."""
     try:
         st.markdown("<div class='sec-title'>Buscador de Acciones por Nombre</div>", unsafe_allow_html=True)
         st.markdown("""
@@ -562,7 +793,7 @@ def _render_security_finder():
           Busca acciones por nombre de empresa o ticker parcial. Los resultados se obtienen de yfinance.
         </div>""", unsafe_allow_html=True)
 
-        search_query = st.text_input("🔎 Nombre de empresa o ticker",
+        search_query = st.text_input("Nombre de empresa o ticker",
                                       placeholder="Ej: Apple, Microsoft, Tesla, NVDA...",
                                       key="finder_query")
 
@@ -621,8 +852,8 @@ def _render_security_finder():
                         results.append({
                             "Ticker": sym,
                             "Empresa": (name or sym)[:40],
-                            "Sector": info.get("sector", "—"),
-                            "Industria": (info.get("industry", "—") or "—")[:30],
+                            "Sector": info.get("sector", "--"),
+                            "Industria": (info.get("industry", "--") or "--")[:30],
                             "Mkt Cap": info.get("marketCap", 0),
                             "Precio": info.get("currentPrice") or info.get("regularMarketPrice", 0),
                             "P/E": info.get("trailingPE"),
@@ -641,8 +872,8 @@ def _render_security_finder():
                         "P/E": "{:.1f}",
                         "Div %": "{:.2f}%",
                         "Mkt Cap": lambda v: f"${v/1e9:.1f}B" if v and v > 1e9
-                                   else (f"${v/1e6:.0f}M" if v and v > 1e6 else "—"),
-                    }, na_rep="—"),
+                                   else (f"${v/1e6:.0f}M" if v and v > 1e6 else "--"),
+                    }, na_rep="--"),
                     use_container_width=True, hide_index=True,
                 )
 
@@ -655,7 +886,7 @@ def _render_security_finder():
                 if finder_select:
                     import streamlit as _st
                     _st.session_state.active_ticker = finder_select
-                    st.success(f"✅ Ticker activo: {finder_select}")
+                    st.success(f"Ticker activo: {finder_select}")
 
                 # Add to watchlist
                 finder_add = st.multiselect(
@@ -680,12 +911,13 @@ def render():
     <div class='top-header'>
       <div>
         <h1>Market Screener</h1>
-        <p>Filtrado fundamental · Comparación rápida · Selección Value & Growth</p>
+        <p>Filtrado fundamental - Comparacion rapida - Seleccion Value & Growth</p>
       </div>
     </div>""", unsafe_allow_html=True)
 
-    tab_yf, tab_fvz, tab_heatmap, tab_finder = st.tabs(
-        ["📊 yfinance Screener", "🔍 Finviz Screener", "🗺️ Sector Heatmap", "🔎 Buscador Avanzado"])
+    tab_yf, tab_fvz, tab_heatmap, tab_indices, tab_finder = st.tabs(
+        ["yfinance Screener", "Finviz Screener", "Sector Heatmap",
+         "Indices Globales", "Buscador Avanzado"])
 
     with tab_yf:
         _render_yfinance_screener()
@@ -695,6 +927,9 @@ def render():
 
     with tab_heatmap:
         _render_sector_heatmap()
+
+    with tab_indices:
+        _render_global_indices()
 
     with tab_finder:
         _render_security_finder()

@@ -238,6 +238,107 @@ def render():
     except Exception as e:
         st.info(f"No se pudieron calcular métricas de riesgo: {e}")
 
+    # ── MARKET SENTIMENT (multi-source) ──
+    try:
+        from data_sources import get_aggregator
+        agg = get_aggregator()
+
+        st.markdown("<div class='sec-title'>Sentimiento de Mercado</div>", unsafe_allow_html=True)
+
+        sm1, sm2, sm3 = st.columns(3)
+
+        # Fear & Greed Index — gauge chart
+        with sm1:
+            fg = agg.get_fear_greed_index()
+            if fg:
+                fg_val = fg["value"]
+                if fg_val <= 25:
+                    fg_color = "#f87171"
+                elif fg_val <= 45:
+                    fg_color = "#fb923c"
+                elif fg_val <= 55:
+                    fg_color = "#fbbf24"
+                elif fg_val <= 75:
+                    fg_color = "#a3e635"
+                else:
+                    fg_color = "#34d399"
+
+                fig_fg = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=fg_val,
+                    title={"text": "Fear & Greed Index", "font": {"color": "#94a3b8", "size": 13}},
+                    number={"font": {"color": fg_color, "size": 36}},
+                    gauge={
+                        "axis": {"range": [0, 100], "tickcolor": "#334155", "dtick": 25},
+                        "bar": {"color": fg_color, "thickness": 0.3},
+                        "bgcolor": "#0a0a0a",
+                        "bordercolor": "#1a1a1a",
+                        "steps": [
+                            {"range": [0, 25], "color": "rgba(248,113,113,0.15)"},
+                            {"range": [25, 45], "color": "rgba(251,146,60,0.12)"},
+                            {"range": [45, 55], "color": "rgba(251,191,36,0.10)"},
+                            {"range": [55, 75], "color": "rgba(163,230,53,0.10)"},
+                            {"range": [75, 100], "color": "rgba(52,211,153,0.12)"},
+                        ],
+                        "threshold": {
+                            "line": {"color": "#f0f6ff", "width": 2},
+                            "thickness": 0.8, "value": fg_val,
+                        },
+                    },
+                ))
+                fig_fg.update_layout(**DARK, height=260)
+                st.plotly_chart(fig_fg, use_container_width=True)
+                st.caption(f"Clasificacion: **{fg['label']}**")
+            else:
+                st.markdown(kpi("Fear & Greed", "N/A", "API no disponible", "blue"), unsafe_allow_html=True)
+
+        # SPY Put/Call Ratio
+        with sm2:
+            pcr = agg.get_spy_put_call_ratio()
+            if pcr:
+                ratio = pcr["ratio"]
+                if ratio > 1.0:
+                    pcr_label = "Bearish"
+                    pcr_color = "#f87171"
+                elif ratio > 0.7:
+                    pcr_label = "Neutral"
+                    pcr_color = "#fbbf24"
+                else:
+                    pcr_label = "Bullish"
+                    pcr_color = "#34d399"
+
+                st.markdown(kpi("SPY Put/Call Ratio", f"{ratio:.3f}",
+                                f"{pcr_label} | Calls: {pcr['calls_vol']:,} · Puts: {pcr['puts_vol']:,}",
+                                "green" if ratio <= 0.7 else ("red" if ratio > 1.0 else "yellow")),
+                            unsafe_allow_html=True)
+                st.caption(f"Expiracion: {pcr['expiry']}")
+            else:
+                st.markdown(kpi("SPY Put/Call", "N/A", "Sin datos", "blue"), unsafe_allow_html=True)
+
+        # VIX Level
+        with sm3:
+            vix = agg.get_vix()
+            if vix:
+                if vix < 15:
+                    vix_label = "Baja volatilidad"
+                    vix_c = "green"
+                elif vix < 20:
+                    vix_label = "Normal"
+                    vix_c = "blue"
+                elif vix < 30:
+                    vix_label = "Elevada"
+                    vix_c = "yellow"
+                else:
+                    vix_label = "Panico"
+                    vix_c = "red"
+                st.markdown(kpi("VIX (Volatilidad)", f"{vix:.2f}", vix_label, vix_c),
+                            unsafe_allow_html=True)
+            else:
+                st.markdown(kpi("VIX", "N/A", "Sin datos", "blue"), unsafe_allow_html=True)
+
+    except Exception as e:
+        st.info(f"No se pudo cargar sentimiento de mercado: {e}")
+
     # ── INVESTMENT THESES SUMMARY ──
     theses = db.get_all_investment_notes()
     if not theses.empty:

@@ -1537,6 +1537,123 @@ def render():
             except Exception as e:
                 st.warning(f"Error obteniendo datos ESG: {e}")
 
+        # ── MULTI-SOURCE DATA INTELLIGENCE ──
+        try:
+            from data_sources import get_aggregator
+            _agg = get_aggregator()
+
+            with st.expander("🏛️ Holders Institucionales", expanded=False):
+                try:
+                    inst_holders = _agg.get_institutional_holders(ticker_solo)
+                    if inst_holders is not None and not inst_holders.empty:
+                        st.markdown(f"""
+                        <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1.5px;
+                                    font-weight:600;margin-bottom:12px;'>
+                            TOP INSTITUTIONAL HOLDERS — {ticker_solo}</div>
+                        """, unsafe_allow_html=True)
+                        st.dataframe(
+                            inst_holders.style.set_properties(**{
+                                "background-color": "#0a0a0a",
+                                "color": "#c8d6e5",
+                                "border-color": "#1a1a1a",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.info("No se encontraron datos de holders institucionales para este ticker.")
+                except Exception as e_inst:
+                    st.warning(f"Error obteniendo holders institucionales: {e_inst}")
+
+            with st.expander("📊 Flujo de Opciones", expanded=False):
+                try:
+                    opts = _agg.get_options_flow(ticker_solo)
+                    if opts:
+                        st.markdown(f"""
+                        <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1.5px;
+                                    font-weight:600;margin-bottom:12px;'>
+                            OPTIONS FLOW — {ticker_solo} (proximas {len(opts)} expiraciones)</div>
+                        """, unsafe_allow_html=True)
+
+                        opt_df = pd.DataFrame(opts)
+
+                        # Put/Call ratio bar chart
+                        fig_opts = go.Figure()
+                        fig_opts.add_trace(go.Bar(
+                            x=opt_df["expiry"], y=opt_df["calls_vol"],
+                            name="Calls Vol", marker_color="#34d399",
+                        ))
+                        fig_opts.add_trace(go.Bar(
+                            x=opt_df["expiry"], y=opt_df["puts_vol"],
+                            name="Puts Vol", marker_color="#f87171",
+                        ))
+                        fig_opts.update_layout(
+                            **DARK, height=300, barmode="group",
+                            title=dict(
+                                text="Volumen Calls vs Puts por Expiracion",
+                                font=dict(color="#94a3b8", size=13), x=0.5,
+                            ),
+                            legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a"),
+                            xaxis_title="Fecha Expiracion",
+                            yaxis_title="Volumen",
+                        )
+                        st.plotly_chart(fig_opts, use_container_width=True)
+
+                        # Ratio summary
+                        for o in opts:
+                            ratio = o["put_call_ratio"]
+                            if ratio > 1.0:
+                                r_color = "#f87171"
+                                r_label = "Bearish"
+                            elif ratio > 0.7:
+                                r_color = "#fbbf24"
+                                r_label = "Neutral"
+                            else:
+                                r_color = "#34d399"
+                                r_label = "Bullish"
+                            st.markdown(f"""
+                            <div style='display:inline-block;margin-right:16px;padding:8px 14px;
+                                        background:rgba(30,30,30,0.6);border:1px solid #1a1a1a;
+                                        border-radius:10px;margin-bottom:8px;'>
+                              <span style='color:#64748b;font-size:11px;'>Exp {o["expiry"]}</span>
+                              <span style='color:{r_color};font-weight:700;margin-left:8px;'>
+                                P/C: {ratio:.3f}</span>
+                              <span style='color:{r_color};font-size:11px;margin-left:4px;'>({r_label})</span>
+                            </div>""", unsafe_allow_html=True)
+                    else:
+                        st.info("No hay datos de opciones disponibles para este ticker.")
+                except Exception as e_opts:
+                    st.warning(f"Error obteniendo flujo de opciones: {e_opts}")
+
+            with st.expander("👤 Insider Trading", expanded=False):
+                try:
+                    insiders = _agg.get_insider_trades(ticker_solo)
+                    if insiders is not None and not insiders.empty:
+                        st.markdown(f"""
+                        <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1.5px;
+                                    font-weight:600;margin-bottom:12px;'>
+                            INSIDER TRANSACTIONS — {ticker_solo}</div>
+                        """, unsafe_allow_html=True)
+                        st.dataframe(
+                            insiders.style.set_properties(**{
+                                "background-color": "#0a0a0a",
+                                "color": "#c8d6e5",
+                                "border-color": "#1a1a1a",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.info("No se encontraron transacciones de insiders. "
+                                "Asegurate de tener instalado finvizfinance (pip install finvizfinance).")
+                except Exception as e_ins:
+                    st.warning(f"Error obteniendo insider trading: {e_ins}")
+
+        except ImportError:
+            pass  # data_sources module not available
+        except Exception:
+            pass  # graceful degradation
+
         # ── AI ANALYSIS (standalone) ──
         st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)
         providers = ai_engine.get_available_providers()

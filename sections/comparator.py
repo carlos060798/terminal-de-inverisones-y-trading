@@ -256,7 +256,7 @@ def render():
                 r=values_closed,
                 theta=cats_closed,
                 fill="toself",
-                fillcolor=COLORS[i].replace(")", ",0.1)").replace("rgb", "rgba") if "rgb" in COLORS[i] else COLORS[i] + "1A",
+                fillcolor=f"rgba({int(COLORS[i][1:3],16)},{int(COLORS[i][3:5],16)},{int(COLORS[i][5:7],16)},0.1)",
                 name=t,
                 line=dict(color=COLORS[i], width=2),
                 marker=dict(size=5, color=COLORS[i]),
