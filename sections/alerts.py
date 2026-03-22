@@ -9,6 +9,21 @@ import database as db
 from ui_shared import DARK, fmt, kpi
 
 
+def _send_telegram(message, bot_token, chat_id):
+    """Send message via Telegram Bot API — no dependencies needed."""
+    try:
+        import requests
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        try:
+            r = requests.post(url, data=data, timeout=5)
+            return r.json().get("ok", False)
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
 def _check_alerts(alerts_df: pd.DataFrame) -> list:
     """Check active (non-triggered) alerts against live prices.
     Returns list of dicts with alert info + current price for triggered ones."""
@@ -102,6 +117,29 @@ def render():
     except Exception as e:
         st.info(f"No se pudo mostrar el formulario de alertas: {e}")
 
+    # ── TELEGRAM CONFIG ────────────────────────────────────────────────────────
+    try:
+        with st.expander("⚙️ Configurar Telegram"):
+            bot_token = st.text_input("Bot Token", type="password",
+                                       value=st.session_state.get('telegram_bot_token', ''))
+            chat_id = st.text_input("Chat ID",
+                                     value=st.session_state.get('telegram_chat_id', ''))
+            if st.button("Guardar config Telegram"):
+                st.session_state.telegram_bot_token = bot_token
+                st.session_state.telegram_chat_id = chat_id
+                st.success("Config guardada")
+            if st.button("Enviar test"):
+                try:
+                    result = _send_telegram("🧪 Test desde Quantum Terminal", bot_token, chat_id)
+                    if result:
+                        st.success("Mensaje de test enviado correctamente.")
+                    else:
+                        st.error("No se pudo enviar el mensaje. Verifica token y chat ID.")
+                except Exception as e:
+                    st.error(f"Error enviando test: {e}")
+    except Exception as e:
+        st.info(f"No se pudo mostrar config Telegram: {e}")
+
     # ── CHECK LIVE ALERTS ─────────────────────────────────────────────────────
     st.markdown("<div class='sec-title'>Monitoreo en Vivo</div>", unsafe_allow_html=True)
     try:
@@ -121,6 +159,21 @@ def render():
                         f"**{t['ticker']}** ha {direction_label} "
                         f"${t['threshold']:,.2f} — Precio actual: ${t['price']:,.2f}"
                     )
+                    # Send Telegram notification if configured
+                    try:
+                        tg_token = st.session_state.get('telegram_bot_token', '')
+                        tg_chat = st.session_state.get('telegram_chat_id', '')
+                        if tg_token and tg_chat:
+                            cond = "Por encima de" if t["direction"] == "above" else "Por debajo de"
+                            msg = (
+                                f"🔔 <b>ALERTA ACTIVADA</b>\n"
+                                f"Ticker: {t['ticker']}\n"
+                                f"Precio: ${t['price']:,.2f}\n"
+                                f"Condición: {cond} ${t['threshold']:,.2f}"
+                            )
+                            _send_telegram(msg, tg_token, tg_chat)
+                    except Exception:
+                        pass
                 # Reload after marking
                 alerts_df = db.get_alerts()
             else:

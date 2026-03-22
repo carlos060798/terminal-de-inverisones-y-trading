@@ -8,7 +8,7 @@ def get_ticker_info(ticker: str) -> dict:
     """Cached ticker info (5 min TTL)."""
     try:
         return yf.Ticker(ticker).info
-    except:
+    except Exception:
         return {}
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -16,7 +16,7 @@ def get_ticker_price(ticker: str) -> float:
     """Cached last price (5 min TTL)."""
     try:
         return yf.Ticker(ticker).fast_info.get('lastPrice', 0)
-    except:
+    except Exception:
         return 0.0
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -29,7 +29,7 @@ def get_financials(ticker: str) -> dict:
             'balance': tk.balance_sheet,
             'cashflow': tk.cashflow,
         }
-    except:
+    except Exception:
         return {'income': pd.DataFrame(), 'balance': pd.DataFrame(), 'cashflow': pd.DataFrame()}
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -37,7 +37,7 @@ def get_history(ticker: str, period: str = "1y") -> pd.DataFrame:
     """Cached price history (10 min TTL)."""
     try:
         return yf.download(ticker, period=period, progress=False)
-    except:
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -52,10 +52,10 @@ def get_batch_prices(tickers_tuple: tuple) -> dict:
                     prices[t] = float(data['Close'].iloc[-1])
                 else:
                     prices[t] = float(data[t]['Close'].iloc[-1])
-            except:
+            except Exception:
                 prices[t] = 0.0
         return prices
-    except:
+    except Exception:
         return {t: 0.0 for t in tickers_tuple}
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -63,7 +63,7 @@ def get_dividends(ticker: str) -> pd.Series:
     """Cached dividend history."""
     try:
         return yf.Ticker(ticker).dividends
-    except:
+    except Exception:
         return pd.Series()
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -71,7 +71,7 @@ def cached_capital_returns(ticker):
     from valuation import compute_capital_returns
     try:
         return compute_capital_returns(ticker)
-    except:
+    except Exception:
         return {}
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -79,5 +79,5 @@ def cached_health_scores(ticker):
     from valuation import compute_health_scores
     try:
         return compute_health_scores(ticker)
-    except:
+    except Exception:
         return {}

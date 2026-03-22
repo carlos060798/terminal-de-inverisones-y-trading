@@ -240,7 +240,7 @@ def _render_economic_calendar(fred):
     display = filtered[["date", "event", "category", "impact", "status", "source"]].copy()
     display.columns = ["Fecha", "Evento", "Categor\u00eda", "Impacto", "Estado", "Fuente"]
 
-    styled = display.style.applymap(status_style, subset=["Estado"])
+    styled = display.style.map(status_style, subset=["Estado"])
     st.dataframe(styled, use_container_width=True, hide_index=True, height=400)
 
     # Historical context

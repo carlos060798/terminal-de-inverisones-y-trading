@@ -72,6 +72,48 @@ def render():
             else:
                 st.warning("Completa Ticker, Precio de Entrada y Acciones.")
 
+    # ── IMPORT CSV ─────────────────────────────────────────────────────────────
+    try:
+        with st.expander("📥 Importar Trades (CSV)"):
+            st.markdown("**Formato requerido:** ticker, type, entry_price, exit_price, shares, date")
+            st.markdown("Ejemplo: `AAPL,Long,150.00,175.00,10,2024-01-15`")
+
+            uploaded = st.file_uploader("Subir CSV", type=["csv"])
+            if uploaded and st.button("Importar"):
+                try:
+                    import csv, io
+                    content = uploaded.read().decode('utf-8')
+                    reader = csv.DictReader(io.StringIO(content))
+                    count = 0
+                    for row in reader:
+                        try:
+                            raw_type = row.get('type', 'Long').strip()
+                            trade_type = "Compra" if raw_type.lower() in ("long", "compra", "buy") else "Venta"
+                            exit_p = float(row.get('exit_price', 0))
+                            db.add_trade(
+                                trade_date=row.get('date', ''),
+                                ticker=row.get('ticker', '').upper().strip(),
+                                trade_type=trade_type,
+                                entry_price=float(row.get('entry_price', 0)),
+                                exit_price=exit_p if exit_p > 0 else None,
+                                shares=float(row.get('shares', 0)),
+                                strategy='',
+                                psych_notes='',
+                            )
+                            count += 1
+                        except Exception as e:
+                            st.warning(f"Fila saltada: {e}")
+                    st.success(f"✅ {count} trades importados")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al importar CSV: {e}")
+
+            # Download template
+            template = "ticker,type,entry_price,exit_price,shares,date\nAAPL,Long,150.00,175.00,10,2024-01-15\nMSFT,Short,400.00,380.00,5,2024-02-20"
+            st.download_button("📋 Descargar plantilla CSV", template, "template_trades.csv", "text/csv")
+    except Exception as e:
+        st.info(f"No se pudo mostrar importador CSV: {e}")
+
     trades = db.get_trades()
     if trades.empty:
         st.info("Aún no hay operaciones registradas.")
