@@ -3,8 +3,7 @@ title: Quantum Retail Terminal
 emoji: 💎
 colorFrom: blue
 colorTo: purple
-sdk: streamlit
-sdk_version: "1.44.1"
+sdk: docker
 app_file: app.py
 pinned: true
 ---
