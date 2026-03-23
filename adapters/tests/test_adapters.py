@@ -34,7 +34,7 @@ def test_mock_adapter_fetch():
 @patch("adapters.registry._CONFIGS", {"mock_test": MockAdapter.config})
 def test_execution_engine_fetch_one(mock_get_adapter, engine):
     mock_get_adapter.return_value = MockAdapter()
-    engine.circuit_breakers.reset_all()
+    engine.circuit_breakers._breakers.clear()
 
     res = engine.fetch_one("mock_test", use_cache=False)
     assert res is not None
