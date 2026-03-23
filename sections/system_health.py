@@ -8,8 +8,7 @@ import time
 from datetime import datetime
 from ui_shared import kpi
 
-
-VERSION = "5.0"
+VERSION = "7.0"
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "investment_data.db")
 
 
@@ -75,6 +74,8 @@ def render():
       <h1>⚙️ Salud del Sistema</h1>
       <p>Estado de APIs, base de datos y conectividad</p>
     </div>""", unsafe_allow_html=True)
+
+    st.info("💡 Para métricas detalladas de los 49 proveedores, circuit breakers y latencias, visita la nueva pestaña **Data Health**.")
 
     # ── VERSION + TIMESTAMP ──
     c1, c2, c3 = st.columns(3)

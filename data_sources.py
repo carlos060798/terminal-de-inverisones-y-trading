@@ -1,9 +1,9 @@
 """
 Multi-source data aggregator for Quantum Retail Terminal.
 Combines data from multiple free sources for richer analysis.
+Migrated to Data Fabric Engine (v7) backwards-compatible wrapper.
 """
 
-import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -12,238 +12,112 @@ try:
 except ImportError:
     st = None
 
-try:
-    import yfinance as yf
-except ImportError:
-    yf = None
+from adapters.execution_engine import ExecutionEngine
 
+# Module-level instance for non-streamlit contexts
+_engine = None
+
+def get_engine():
+    global _engine
+    if st is not None:
+        return _get_st_engine()
+    if _engine is None:
+        _engine = ExecutionEngine()
+    return _engine
+
+if st is not None:
+    @st.cache_resource
+    def _get_st_engine():
+        return ExecutionEngine()
 
 class DataAggregator:
-    """Fetches and merges data from multiple free sources."""
+    """Fetches and merges data from multiple free sources using the new Data Fabric."""
+    def __init__(self):
+        self.engine = get_engine()
 
-    # ── Fear & Greed Index (alternative.me — free, no key) ──────────────
     def get_fear_greed_index(self):
-        """CNN Fear & Greed Index via alternative.me API (free, no key)."""
-        try:
-            r = requests.get(
-                "https://api.alternative.me/fng/?limit=30", timeout=10
-            )
-            data = r.json()["data"]
-            return {
-                "value": int(data[0]["value"]),
-                "label": data[0]["value_classification"],
-                "history": [
-                    (d["timestamp"], int(d["value"])) for d in data
-                ],
-            }
-        except Exception:
-            return None
+        res = self.engine.fetch_one("fear_greed")
+        return res.data if res and res.success else None
 
-    # ── Crypto Overview (CoinGecko — free, no key, 30 req/min) ──────────
     def get_crypto_overview(self):
-        """Top cryptos from CoinGecko API (free, no key, 30 req/min)."""
-        try:
-            r = requests.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={
-                    "vs_currency": "usd",
-                    "order": "market_cap_desc",
-                    "per_page": 20,
-                    "sparkline": "true",
-                },
-                timeout=10,
-            )
-            return r.json()
-        except Exception:
-            return None
+        res = self.engine.fetch_one("coingecko")
+        if res and res.success:
+            if isinstance(res.data, pd.DataFrame):
+                return res.data.to_dict("records")
+            return res.data
+        return None
 
-    # ── VIX current level (via yfinance ^VIX) ───────────────────────────
     def get_vix(self):
-        """Current VIX level from yfinance."""
-        if not yf:
-            return None
-        try:
-            tk = yf.Ticker("^VIX")
-            price = tk.fast_info.last_price
-            return round(price, 2) if price else None
-        except Exception:
-            return None
+        res = self.engine.fetch_one("cboe_vix")
+        if res and res.success:
+            return float(res.data) if res.data is not None else None
+        return None
 
-    # ── SPY Put/Call Ratio (options volume via yfinance) ────────────────
     def get_spy_put_call_ratio(self):
-        """Put/Call ratio for SPY from yfinance options data."""
-        if not yf:
-            return None
-        try:
-            tk = yf.Ticker("SPY")
-            dates = tk.options[:1]  # nearest expiry
-            if not dates:
-                return None
-            chain = tk.option_chain(dates[0])
-            calls_vol = chain.calls["volume"].sum() if "volume" in chain.calls else 0
-            puts_vol = chain.puts["volume"].sum() if "volume" in chain.puts else 0
-            ratio = puts_vol / max(calls_vol, 1)
-            return {
-                "ratio": round(ratio, 3),
-                "calls_vol": int(calls_vol),
-                "puts_vol": int(puts_vol),
-                "expiry": dates[0],
-            }
-        except Exception:
-            return None
+        res = self.engine.fetch_one("spy_pcr")
+        return res.data if res and res.success else None
 
-    # ── Insider Trades (finvizfinance) ──────────────────────────────────
     def get_insider_trades(self, ticker):
-        """Insider trading data from finvizfinance."""
-        try:
-            from finvizfinance.quote import finvizfinance
-            stock = finvizfinance(ticker)
-            df = stock.ticker_inside_trader()
-            if df is not None and not df.empty:
-                return df.head(15)
-            return None
-        except Exception:
-            return None
+        res = self.engine.fetch_one("finviz", ticker=ticker)
+        return res.data if res and res.success else None
 
-    # ── Institutional Holders (yfinance) ────────────────────────────────
     def get_institutional_holders(self, ticker):
-        """Top institutional holders from yfinance."""
-        if not yf:
-            return None
-        try:
-            t = yf.Ticker(ticker)
-            inst = t.institutional_holders
-            if inst is not None and not inst.empty:
-                return inst.head(10)
-            return None
-        except Exception:
-            return None
+        res = self.engine.fetch_one("inst_holders", ticker=ticker)
+        return res.data if res and res.success else None
 
-    # ── Options Flow (yfinance — next 3 expiry dates) ──────────────────
     def get_options_flow(self, ticker):
-        """Options data from yfinance for the next 3 expiry dates."""
-        if not yf:
-            return None
-        try:
-            t = yf.Ticker(ticker)
-            dates = t.options[:3]  # Next 3 expiry dates
-            result = []
-            for d in dates:
-                chain = t.option_chain(d)
-                calls_vol = (
-                    chain.calls["volume"].sum()
-                    if "volume" in chain.calls
-                    else 0
-                )
-                puts_vol = (
-                    chain.puts["volume"].sum()
-                    if "volume" in chain.puts
-                    else 0
-                )
-                result.append(
-                    {
-                        "expiry": d,
-                        "calls_vol": int(calls_vol) if pd.notna(calls_vol) else 0,
-                        "puts_vol": int(puts_vol) if pd.notna(puts_vol) else 0,
-                        "put_call_ratio": round(
-                            puts_vol / max(calls_vol, 1), 3
-                        ),
-                    }
-                )
-            return result if result else None
-        except Exception:
-            return None
+        res = self.engine.fetch_one("options_flow", ticker=ticker)
+        return res.data if res and res.success else None
 
-    # ── SEC Filings (SEC EDGAR — free, no key) ─────────────────────────
     def get_sec_filings(self, ticker):
-        """Recent SEC filings from SEC EDGAR (free, no key)."""
-        try:
-            headers = {"User-Agent": "QuantumTerminal admin@example.com"}
-            r = requests.get(
-                "https://efts.sec.gov/LATEST/search-index",
-                params={
-                    "q": ticker,
-                    "dateRange": "custom",
-                    "startdt": "2024-01-01",
-                    "forms": "10-K,10-Q,8-K",
-                },
-                headers=headers,
-                timeout=10,
-            )
-            if r.status_code == 200:
-                return r.text[:2000]
-            return None
-        except Exception:
-            return None
+        res = self.engine.fetch_one("sec_edgar", ticker=ticker)
+        if res and res.success:
+            if isinstance(res.data, pd.DataFrame):
+                return res.data.to_string()[:2000]
+            return str(res.data)[:2000]
+        return None
 
-
-# Singleton instance for use across the app
 _aggregator = None
 
-
 def get_aggregator():
-    """Return singleton DataAggregator instance."""
     global _aggregator
     if _aggregator is None:
         _aggregator = DataAggregator()
     return _aggregator
 
-
-# ── Cached standalone wrapper functions (st.cache_data doesn't work on methods) ──
 if st is not None:
     @st.cache_data(ttl=300)
     def cached_fear_greed_index():
-        """Cached Fear & Greed Index (5 min TTL)."""
-        try:
-            return get_aggregator().get_fear_greed_index()
-        except Exception:
-            return None
+        try: return get_aggregator().get_fear_greed_index()
+        except Exception: return None
 
     @st.cache_data(ttl=300)
     def cached_crypto_overview():
-        """Cached Crypto Overview (5 min TTL)."""
-        try:
-            return get_aggregator().get_crypto_overview()
-        except Exception:
-            return None
+        try: return get_aggregator().get_crypto_overview()
+        except Exception: return None
 
     @st.cache_data(ttl=300)
     def cached_vix():
-        """Cached VIX level (5 min TTL)."""
-        try:
-            return get_aggregator().get_vix()
-        except Exception:
-            return None
+        try: return get_aggregator().get_vix()
+        except Exception: return None
 
     @st.cache_data(ttl=300)
     def cached_spy_put_call_ratio():
-        """Cached SPY Put/Call Ratio (5 min TTL)."""
-        try:
-            return get_aggregator().get_spy_put_call_ratio()
-        except Exception:
-            return None
+        try: return get_aggregator().get_spy_put_call_ratio()
+        except Exception: return None
 else:
-    # Fallback without caching if streamlit not available
     def cached_fear_greed_index():
-        try:
-            return get_aggregator().get_fear_greed_index()
-        except Exception:
-            return None
+        try: return get_aggregator().get_fear_greed_index()
+        except Exception: return None
 
     def cached_crypto_overview():
-        try:
-            return get_aggregator().get_crypto_overview()
-        except Exception:
-            return None
+        try: return get_aggregator().get_crypto_overview()
+        except Exception: return None
 
     def cached_vix():
-        try:
-            return get_aggregator().get_vix()
-        except Exception:
-            return None
+        try: return get_aggregator().get_vix()
+        except Exception: return None
 
     def cached_spy_put_call_ratio():
-        try:
-            return get_aggregator().get_spy_put_call_ratio()
-        except Exception:
-            return None
+        try: return get_aggregator().get_spy_put_call_ratio()
+        except Exception: return None
