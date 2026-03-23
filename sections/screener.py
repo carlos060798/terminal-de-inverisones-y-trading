@@ -16,13 +16,41 @@ try:
 except ImportError:
     HAS_FINVIZ = False
 
+AVAILABLE_METRICS = {
+    "P/E Ratio": {"key": "trailingPE", "type": "range", "min": 0, "max": 200, "default": (0, 50), "step": 1.0, "format": "%.1f"},
+    "Forward P/E": {"key": "forwardPE", "type": "range", "min": 0, "max": 200, "default": (0, 40), "step": 1.0, "format": "%.1f"},
+    "P/B Ratio": {"key": "priceToBook", "type": "range", "min": 0, "max": 50, "default": (0, 10), "step": 0.5, "format": "%.1f"},
+    "P/S Ratio": {"key": "priceToSalesTrailing12Months", "type": "range", "min": 0, "max": 50, "default": (0, 10), "step": 0.5, "format": "%.1f"},
+    "EV/EBITDA": {"key": "enterpriseToEbitda", "type": "range", "min": 0, "max": 100, "default": (0, 20), "step": 1.0, "format": "%.1f"},
+    "Market Cap ($B)": {"key": "marketCap", "type": "range", "min": 0, "max": 5000, "default": (1, 5000), "step": 1.0, "format": "%.0f", "scale": 1e9},
+    "Dividend Yield (%)": {"key": "dividendYield", "type": "range", "min": 0.0, "max": 20.0, "default": (0.0, 20.0), "step": 0.1, "format": "%.1f", "scale": 100},
+    "Revenue Growth (%)": {"key": "revenueGrowth", "type": "range", "min": -50, "max": 200, "default": (0, 200), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Earnings Growth (%)": {"key": "earningsGrowth", "type": "range", "min": -100, "max": 500, "default": (-100, 500), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Profit Margin (%)": {"key": "profitMargins", "type": "range", "min": -50, "max": 100, "default": (0, 100), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Operating Margin (%)": {"key": "operatingMargins", "type": "range", "min": -50, "max": 100, "default": (0, 100), "step": 1.0, "format": "%.0f", "scale": 100},
+    "ROE (%)": {"key": "returnOnEquity", "type": "range", "min": -50, "max": 200, "default": (0, 200), "step": 1.0, "format": "%.0f", "scale": 100},
+    "ROA (%)": {"key": "returnOnAssets", "type": "range", "min": -30, "max": 100, "default": (0, 100), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Debt/Equity": {"key": "debtToEquity", "type": "range", "min": 0, "max": 500, "default": (0, 200), "step": 5.0, "format": "%.0f"},
+    "Current Ratio": {"key": "currentRatio", "type": "range", "min": 0, "max": 10, "default": (1, 10), "step": 0.1, "format": "%.1f"},
+    "Quick Ratio": {"key": "quickRatio", "type": "range", "min": 0, "max": 10, "default": (0.5, 10), "step": 0.1, "format": "%.1f"},
+    "Beta": {"key": "beta", "type": "range", "min": -2, "max": 5, "default": (0, 3), "step": 0.1, "format": "%.1f"},
+    "52W High (%)": {"key": "fiftyTwoWeekHigh_pct", "type": "range", "min": -80, "max": 20, "default": (-30, 0), "step": 1.0, "format": "%.0f", "computed": True},
+    "Avg Volume (M)": {"key": "averageVolume", "type": "range", "min": 0, "max": 100, "default": (0.5, 100), "step": 0.5, "format": "%.1f", "scale": 1e6},
+    "PEG Ratio": {"key": "pegRatio", "type": "range", "min": 0, "max": 10, "default": (0, 3), "step": 0.1, "format": "%.1f"},
+    "Price/FCF": {"key": "priceToFreeCashflows", "type": "range", "min": 0, "max": 100, "default": (0, 30), "step": 1.0, "format": "%.0f"},
+    "Insider Ownership (%)": {"key": "heldPercentInsiders", "type": "range", "min": 0, "max": 100, "default": (0, 100), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Institutional Ownership (%)": {"key": "heldPercentInstitutions", "type": "range", "min": 0, "max": 100, "default": (0, 100), "step": 1.0, "format": "%.0f", "scale": 100},
+    "Short Ratio": {"key": "shortRatio", "type": "range", "min": 0, "max": 30, "default": (0, 10), "step": 0.5, "format": "%.1f"},
+    "Payout Ratio (%)": {"key": "payoutRatio", "type": "range", "min": 0, "max": 200, "default": (0, 100), "step": 5.0, "format": "%.0f", "scale": 100},
+}
+
 FILTER_PRESETS = {
-    "Personalizado": {},
-    "Value Investing": {"pe_max": 15.0, "div_min": 2.0, "de_max": 1.0, "roe_min": 10.0},
-    "Growth": {"rev_growth_min": 15.0, "roe_min": 15.0, "pe_max": 50.0},
-    "Quality Institucional": {"roic_min": 12.0, "piotroski_min": 6},
-    "Dividend": {"div_min": 3.0, "de_max": 1.5, "pe_max": 25.0},
-    "Safe Haven": {"beta_max": 0.8, "altman_z_min": 3.0, "de_max": 0.5},
+    "Personalizado": [],
+    "Value Investing": ["P/E Ratio", "P/B Ratio", "Dividend Yield (%)", "Debt/Equity", "ROE (%)"],
+    "Growth": ["Revenue Growth (%)", "Earnings Growth (%)", "Profit Margin (%)", "Forward P/E"],
+    "Quality Institucional": ["ROE (%)", "Profit Margin (%)", "Current Ratio", "Debt/Equity", "Revenue Growth (%)"],
+    "Dividend": ["Dividend Yield (%)", "Payout Ratio (%)", "Debt/Equity", "Current Ratio"],
+    "Safe Haven": ["Beta", "Current Ratio", "Debt/Equity", "Dividend Yield (%)"],
 }
 
 # Popular tickers organized by sector
@@ -37,61 +65,75 @@ POPULAR = {
 
 
 def _render_yfinance_screener():
-    """Original yfinance-based screener content."""
+    """Original yfinance-based screener content with dynamic configurable filters."""
     # ── INPUT: Tickers ──
     st.markdown("<div class='sec-title'>Seleccion de Acciones</div>", unsafe_allow_html=True)
     tc1, tc2 = st.columns([2, 1])
 
     with tc1:
-        preset = st.selectbox("Lista predefinida", ["Personalizada"] + list(POPULAR.keys()))
+        ticker_preset = st.selectbox("Lista predefinida", ["Personalizada"] + list(POPULAR.keys()), key="yf_ticker_preset")
     with tc2:
-        if preset == "Personalizada":
+        if ticker_preset == "Personalizada":
             tickers_input = st.text_input("Tickers (separados por coma)",
                                           placeholder="AAPL, MSFT, GOOGL, AMZN")
         else:
-            tickers_input = ", ".join(POPULAR[preset])
+            tickers_input = ", ".join(POPULAR[ticker_preset])
             st.text_input("Tickers seleccionados", value=tickers_input, disabled=True)
 
-    # ── INVESTMENT PROFILE PRESET ──
-    preset_inv = st.selectbox("Perfil de Inversion", list(FILTER_PRESETS.keys()), key="yf_preset")
-    p = FILTER_PRESETS[preset_inv]
+    # ── DYNAMIC CONFIGURABLE FILTERS ──
+    with st.expander("Filtros fundamentales", expanded=True):
 
-    # ── FILTERS ──
-    with st.expander("Filtros fundamentales"):
-        fc1, fc2, fc3, fc4 = st.columns(4)
-        pe_max = fc1.number_input("P/E maximo", min_value=0.0, value=p.get("pe_max", 30.0), step=5.0)
-        roe_min = fc2.number_input("ROE minimo (%)", min_value=0.0, value=p.get("roe_min", 10.0), step=5.0)
-        margin_min = fc3.number_input("Margen neto min (%)", min_value=0.0, value=p.get("margin_min", 5.0), step=5.0)
-        mcap_min = fc4.selectbox("Market Cap min", ["Sin filtro", ">$1B", ">$10B", ">$100B", ">$1T"])
+        # Initialize active filters in session state
+        if 'screener_active_filters' not in st.session_state:
+            st.session_state.screener_active_filters = ["P/E Ratio", "Market Cap ($B)", "Dividend Yield (%)", "ROE (%)", "Debt/Equity"]
 
-        fc5, fc6, fc7, fc8 = st.columns(4)
-        de_max = fc5.number_input("Deuda/Equity max", min_value=0.0, value=p.get("de_max", 2.0), step=0.5)
-        div_min = fc6.number_input("Div Yield min (%)", min_value=0.0, value=p.get("div_min", 0.0), step=0.5)
-        peg_max = fc7.number_input("PEG maximo", min_value=0.0, value=p.get("peg_max", 3.0), step=0.5)
-        beta_max = fc8.number_input("Beta maximo", min_value=0.0, value=p.get("beta_max", 3.0), step=0.5)
+        # Preset selector + Add filter
+        preset_col, add_col = st.columns([3, 2])
+        with preset_col:
+            preset = st.selectbox("Preset de filtros", list(FILTER_PRESETS.keys()), key="filter_preset_select")
+            if preset != "Personalizado":
+                st.session_state.screener_active_filters = list(FILTER_PRESETS[preset])
 
-        # ── Extended filters ──
+        with add_col:
+            available = [m for m in AVAILABLE_METRICS if m not in st.session_state.screener_active_filters]
+            new_filter = st.selectbox("Agregar filtro", ["(seleccionar)"] + available, key="add_filter_select")
+            if new_filter != "(seleccionar)":
+                st.session_state.screener_active_filters.append(new_filter)
+                st.rerun()
+
+        # Render active filters dynamically
+        filter_values = {}
+        cols_per_row = 4
+        active = st.session_state.screener_active_filters
+        for i in range(0, len(active), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx >= len(active):
+                    break
+                metric_name = active[idx]
+                metric = AVAILABLE_METRICS[metric_name]
+                with col:
+                    sub_cols = st.columns([4, 1])
+                    with sub_cols[0]:
+                        val = st.slider(
+                            metric_name,
+                            min_value=float(metric["min"]),
+                            max_value=float(metric["max"]),
+                            value=(float(metric["default"][0]), float(metric["default"][1])),
+                            step=float(metric.get("step", 1.0)),
+                            format=metric.get("format", "%.1f"),
+                            key=f"filter_{metric_name}"
+                        )
+                        filter_values[metric_name] = val
+                    with sub_cols[1]:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("X", key=f"remove_{metric_name}", help=f"Quitar {metric_name}"):
+                            st.session_state.screener_active_filters.remove(metric_name)
+                            st.rerun()
+
+        # Sector & country filters (separate from dynamic metrics)
         st.markdown("---")
-        st.markdown("<span style='color:#94a3b8;font-size:13px;font-weight:600;'>Filtros Avanzados</span>",
-                    unsafe_allow_html=True)
-
-        ef1, ef2, ef3, ef4 = st.columns(4)
-        _mcap_labels = ["Micro (<$300M)", "Small ($300M-$2B)", "Mid ($2B-$10B)",
-                        "Large ($10B-$200B)", "Mega (>$200B)"]
-        mcap_range = ef1.select_slider(
-            "Rango Market Cap",
-            options=_mcap_labels,
-            value=(_mcap_labels[0], _mcap_labels[-1]),
-            key="yf_mcap_range",
-        )
-        rev_growth_min = ef2.number_input("Crec. Ingresos min (%)", min_value=-100.0, value=p.get("rev_growth_min", 0.0),
-                                           step=5.0, key="yf_rev_growth_min")
-        beta_min = ef3.number_input("Beta minimo", min_value=0.0, value=0.0, step=0.1,
-                                     key="yf_beta_min")
-        vol_min = ef4.number_input("Volumen promedio min", min_value=0, value=0,
-                                    step=100000, key="yf_vol_min",
-                                    help="Volumen promedio minimo de negociacion diaria")
-
         fc9, fc10 = st.columns(2)
         sector_filter = fc9.multiselect(
             "Filtrar por Sector",
@@ -105,15 +147,6 @@ def _render_yfinance_screener():
             "Filtrar por Pais", value="", placeholder="ej: United States",
             key="yf_country_filter",
         )
-
-        st.markdown("---")
-        st.markdown("**Filtros Institucionales (Stage 2)**")
-        af1, af2, af3, af4, af5 = st.columns(5)
-        roic_min = af1.number_input("ROIC min %", 0.0, value=p.get("roic_min", 0.0), step=2.0, key="yf_roic_min")
-        roce_min = af2.number_input("ROCE min %", 0.0, value=p.get("roce_min", 0.0), step=2.0, key="yf_roce_min")
-        piotroski_min = af3.number_input("Piotroski min", 0, 9, value=int(p.get("piotroski_min", 0)), key="yf_piotroski_min")
-        altman_z_min = af4.number_input("Altman Z min", 0.0, value=p.get("altman_z_min", 0.0), step=0.5, key="yf_altman_z_min")
-        sy_min = af5.number_input("SY min %", 0.0, value=p.get("sy_min", 0.0), step=1.0, key="yf_sy_min")
 
     if st.button("Escanear mercado", type="primary"):
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
@@ -134,77 +167,69 @@ def _render_yfinance_screener():
                         continue
 
                     price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+                    sector = info.get("sector", "")
+                    country = info.get("country", "")
+                    name = info.get("shortName", ticker)
+
+                    # ── Apply dynamic filters ──
+                    passed = True
+                    for metric_name, (slider_lo, slider_hi) in filter_values.items():
+                        metric = AVAILABLE_METRICS[metric_name]
+                        yf_key = metric["key"]
+                        scale = metric.get("scale", 1)
+
+                        # Handle computed metrics
+                        if metric.get("computed") and yf_key == "fiftyTwoWeekHigh_pct":
+                            high52 = info.get("fiftyTwoWeekHigh")
+                            if high52 and high52 > 0:
+                                raw_val = ((price - high52) / high52) * 100
+                            else:
+                                raw_val = None
+                        else:
+                            raw_val = info.get(yf_key)
+
+                        if raw_val is None:
+                            # Skip filter if data not available (don't exclude)
+                            continue
+
+                        # Convert raw value to display units
+                        # For large numbers (marketCap, volume): divide by scale (1e9, 1e6)
+                        # For ratios (dividendYield, ROE, margins): multiply by scale (100)
+                        if yf_key in ("marketCap", "averageVolume"):
+                            display_val = raw_val / scale
+                        elif scale != 1:
+                            display_val = raw_val * scale
+                        else:
+                            display_val = raw_val
+
+                        # Check if value is within slider range
+                        if display_val < slider_lo or display_val > slider_hi:
+                            passed = False
+                            break
+
+                    if not passed:
+                        continue
+
+                    # Extract common values for results table
                     pe = info.get("trailingPE")
                     pe_fwd = info.get("forwardPE")
                     roe = (info.get("returnOnEquity") or 0) * 100
                     margin = (info.get("profitMargins") or 0) * 100
                     mcap = info.get("marketCap", 0)
-                    de = (info.get("debtToEquity") or 0) / 100
+                    de = info.get("debtToEquity") or 0
                     div_y = (info.get("dividendYield") or 0) * 100
                     peg = info.get("pegRatio")
                     beta = info.get("beta")
                     rev_growth = (info.get("revenueGrowth") or 0) * 100
                     earn_growth = (info.get("earningsGrowth") or 0) * 100
                     avg_volume = info.get("averageVolume") or info.get("averageDailyVolume10Day") or 0
-                    sector = info.get("sector", "")
-                    country = info.get("country", "")
-                    name = info.get("shortName", ticker)
-
-                    # Apply filters
-                    if pe and pe > pe_max:
-                        continue
-                    if roe < roe_min:
-                        continue
-                    if margin < margin_min:
-                        continue
-                    if de > de_max:
-                        continue
-                    if div_y < div_min:
-                        continue
-                    if peg and peg > peg_max:
-                        continue
-                    if beta and beta > beta_max:
-                        continue
-
-                    mcap_thresholds = {">$1B": 1e9, ">$10B": 1e10, ">$100B": 1e11, ">$1T": 1e12}
-                    if mcap_min != "Sin filtro" and mcap < mcap_thresholds.get(mcap_min, 0):
-                        continue
-
-                    # ── Extended filters ──
-                    # Market Cap range filter
-                    _mcap_bounds = {
-                        "Micro (<$300M)": (0, 3e8),
-                        "Small ($300M-$2B)": (3e8, 2e9),
-                        "Mid ($2B-$10B)": (2e9, 1e10),
-                        "Large ($10B-$200B)": (1e10, 2e11),
-                        "Mega (>$200B)": (2e11, float("inf")),
-                    }
-                    try:
-                        _range_lo = _mcap_bounds[mcap_range[0]][0]
-                        _range_hi = _mcap_bounds[mcap_range[1]][1]
-                        if mcap and (mcap < _range_lo or mcap > _range_hi):
-                            continue
-                    except Exception:
-                        pass
-
-                    # Revenue growth min
-                    if rev_growth_min and rev_growth < rev_growth_min:
-                        continue
-
-                    # Beta min
-                    if beta_min and beta is not None and beta < beta_min:
-                        continue
-
-                    # Average volume min
-                    if vol_min and avg_volume < vol_min:
-                        continue
 
                     # Score (simple scoring: count how many criteria are "good")
                     score = 0
                     if pe and pe < 20: score += 1
                     if roe > 15: score += 1
                     if margin > 15: score += 1
-                    if de < 1: score += 1
+                    if de < 100: score += 1
                     if peg and peg < 1.5: score += 1
                     if rev_growth > 10: score += 1
 
@@ -229,45 +254,6 @@ def _render_yfinance_screener():
         if results and country_filter.strip():
             cf_lower = country_filter.strip().lower()
             results = [r for r in results if cf_lower in r.get("Pais", "").lower()]
-
-        # ── Stage 2: Institutional metrics filtering ──
-        try:
-            need_stage2 = any([roic_min > 0, roce_min > 0, piotroski_min > 0, altman_z_min > 0, sy_min > 0])
-            if need_stage2 and results:
-                from cache_utils import cached_capital_returns, cached_health_scores
-                st.info(f"Stage 2: Calculando metricas institucionales para {len(results)} tickers...")
-                progress_s2 = st.progress(0)
-                enriched = []
-                for idx_s2, row in enumerate(results):
-                    progress_s2.progress((idx_s2 + 1) / len(results))
-                    t = row["Ticker"]
-                    try:
-                        cr = cached_capital_returns(t)
-                        hs = cached_health_scores(t)
-                        roic_v = cr.get("roic", 0) if cr else 0
-                        roce_v = cr.get("roce", 0) if cr else 0
-                        sy_v = cr.get("shareholder_yield", 0) if cr else 0
-                        f_v = hs.get("f_score", 0) if hs else 0
-                        z_v = hs.get("z_score", 0) if hs else 0
-
-                        if roic_min > 0 and (roic_v is None or roic_v < roic_min): continue
-                        if roce_min > 0 and (roce_v is None or roce_v < roce_min): continue
-                        if piotroski_min > 0 and (f_v is None or f_v < piotroski_min): continue
-                        if altman_z_min > 0 and (z_v is None or z_v < altman_z_min): continue
-                        if sy_min > 0 and (sy_v is None or sy_v < sy_min): continue
-
-                        row["ROIC %"] = round(roic_v * 100, 1) if roic_v else None
-                        row["ROCE %"] = round(roce_v * 100, 1) if roce_v else None
-                        row["Piotroski"] = f_v
-                        row["Altman Z"] = round(z_v, 2) if z_v else None
-                        row["SY %"] = round(sy_v * 100, 1) if sy_v else None
-                        enriched.append(row)
-                    except:
-                        enriched.append(row)
-                results = enriched
-                progress_s2.empty()
-        except Exception:
-            pass
 
         if not results:
             st.warning("Ninguna accion paso los filtros. Intenta con criterios mas amplios.")

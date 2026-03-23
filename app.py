@@ -614,6 +614,7 @@ _active = sac.tabs([
     sac.TabsItem(label="Backtest", icon="graph-down"),
     sac.TabsItem(label="Comparador", icon="arrows-angle-expand"),
     sac.TabsItem(label="Alertas", icon="bell"),
+    sac.TabsItem(label="AI Vision", icon="eye"),
     sac.TabsItem(label="Sistema", icon="gear"),
 ], color="blue", size="sm", return_index=False)
 
@@ -630,6 +631,7 @@ _routes = {
     "Backtest": "sections.backtest",
     "Comparador": "sections.comparator",
     "Alertas": "sections.alerts",
+    "AI Vision": "sections.chart_vision",
     "Sistema": "sections.system_health",
 }
 if _active in _routes:

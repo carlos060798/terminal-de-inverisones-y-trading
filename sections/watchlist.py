@@ -59,10 +59,29 @@ def render():
       </div>
     </div>""", unsafe_allow_html=True)
 
+    # ── Portfolio Lists ──
+    list_col1, list_col2, list_col3 = st.columns([3, 2, 1])
+    with list_col1:
+        available_lists = db.get_watchlist_lists()
+        options = ['Todas'] + available_lists
+        active_list = st.selectbox("📂 Lista activa", options, key="active_list_select")
+    with list_col2:
+        new_list_name = st.text_input("Nueva lista", key="new_list_input", placeholder="Nombre...")
+    with list_col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("➕ Crear", key="create_list_btn") and new_list_name:
+            st.success(f"Lista '{new_list_name}' creada. Agrega tickers para verla.")
+
+    # Use active_list to filter data throughout
+    if active_list == 'Todas':
+        watchlist_data = db.get_watchlist()
+    else:
+        watchlist_data = db.get_watchlist_by_list(active_list)
+
     # ── TABS ──
-    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt, tab_rebal = st.tabs([
+    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt, tab_rebal, tab_charts_multi = st.tabs([
         "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora",
-        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización", "⚖️ Rebalanceo"
+        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización", "⚖️ Rebalanceo", "📊 Charts"
     ])
 
     # ══════════════════════════════════════════════════════════════
@@ -82,11 +101,80 @@ def render():
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("Agregar ticker"):
                     if new_tick.strip():
-                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes)
-                        st.success(f"✅ {new_tick.upper()} agregado.")
+                        target = active_list if active_list != 'Todas' else 'Principal'
+                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes, target)
+                        st.success(f"✅ {new_tick.upper()} agregado a '{target}'.")
                         st.rerun()
 
-        wl = db.get_watchlist()
+        # ── Excel/CSV Import ──
+        with st.expander("📥 Importar desde Excel/CSV", expanded=False):
+            uploaded_file = st.file_uploader("Seleccionar archivo", type=["xlsx", "csv", "xls"], key="excel_import")
+            if uploaded_file:
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        df_import = pd.read_csv(uploaded_file)
+                    else:
+                        df_import = pd.read_excel(uploaded_file)
+
+                    st.markdown("**Vista previa del archivo:**")
+                    st.dataframe(df_import.head(10), use_container_width=True)
+
+                    # Auto-detect columns
+                    ticker_candidates = [c for c in df_import.columns if any(k in c.lower() for k in ['ticker', 'symbol', 'símbolo', 'accion', 'stock'])]
+                    shares_candidates = [c for c in df_import.columns if any(k in c.lower() for k in ['shares', 'cantidad', 'acciones', 'qty', 'quantity'])]
+                    price_candidates = [c for c in df_import.columns if any(k in c.lower() for k in ['price', 'cost', 'precio', 'costo', 'avg'])]
+                    sector_candidates = [c for c in df_import.columns if any(k in c.lower() for k in ['sector', 'industry', 'industria'])]
+
+                    all_cols = ['(ninguna)'] + list(df_import.columns)
+
+                    mc1, mc2, mc3, mc4 = st.columns(4)
+                    with mc1:
+                        ticker_col = st.selectbox("Columna Ticker*", all_cols,
+                            index=all_cols.index(ticker_candidates[0]) if ticker_candidates else 0, key="map_ticker")
+                    with mc2:
+                        shares_col = st.selectbox("Columna Shares", all_cols,
+                            index=all_cols.index(shares_candidates[0]) if shares_candidates else 0, key="map_shares")
+                    with mc3:
+                        price_col = st.selectbox("Columna Precio", all_cols,
+                            index=all_cols.index(price_candidates[0]) if price_candidates else 0, key="map_price")
+                    with mc4:
+                        sector_col = st.selectbox("Columna Sector", all_cols,
+                            index=all_cols.index(sector_candidates[0]) if sector_candidates else 0, key="map_sector")
+
+                    target_list = st.selectbox("Importar a lista:", db.get_watchlist_lists(), key="import_target_list")
+
+                    if st.button("🚀 Importar", key="btn_import_excel"):
+                        if ticker_col == '(ninguna)':
+                            st.error("Selecciona la columna de Ticker")
+                        else:
+                            imported = 0
+                            errors = 0
+                            for _, row in df_import.iterrows():
+                                try:
+                                    ticker_val = str(row[ticker_col]).strip().upper()
+                                    if not ticker_val or ticker_val in ('NAN', 'NONE', ''):
+                                        continue
+                                    try:
+                                        shares_val = float(row[shares_col]) if shares_col != '(ninguna)' else 0
+                                        if pd.isna(shares_val): shares_val = 0
+                                    except (ValueError, TypeError):
+                                        shares_val = 0
+                                    try:
+                                        price_val = float(row[price_col]) if price_col != '(ninguna)' else 0
+                                        if pd.isna(price_val): price_val = 0
+                                    except (ValueError, TypeError):
+                                        price_val = 0
+                                    sector_val = str(row[sector_col]).strip() if sector_col != '(ninguna)' and pd.notna(row.get(sector_col)) else ''
+                                    db.add_ticker(ticker_val, shares_val, price_val, sector_val, '', target_list)
+                                    imported += 1
+                                except Exception:
+                                    errors += 1
+                            st.success(f"✅ {imported} tickers importados a '{target_list}' | {errors} errores")
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Error leyendo archivo: {e}")
+
+        wl = watchlist_data
         if wl.empty:
             st.info("Tu watchlist está vacía. Agrega tickers para comenzar.")
             return
@@ -986,10 +1074,10 @@ def render():
     with tab_opt:
         try:
             rows = db.get_watchlist()
-            if not rows:
+            if rows.empty:
                 st.info("Agrega al menos 2 tickers a tu watchlist para optimizar la cartera.")
             else:
-                tickers = sorted(set(r[1] for r in rows))
+                tickers = sorted(set(rows["ticker"].tolist()))
                 if len(tickers) < 2:
                     st.info("Se necesitan al menos 2 tickers para la optimización de cartera.")
                 else:
@@ -1409,3 +1497,133 @@ def render():
 
         except Exception as e:
             st.error(f"Error en rebalanceo: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 11: CHARTS — Comparacion Multi-Metrica
+    # ══════════════════════════════════════════════════════════════
+    with tab_charts_multi:
+        st.markdown("### Comparacion Multi-Metrica")
+
+        # Get watchlist tickers
+        _chart_tickers = watchlist_data['ticker'].tolist() if (watchlist_data is not None and not watchlist_data.empty) else []
+
+        if not _chart_tickers:
+            st.info("Agrega tickers a tu watchlist para ver charts comparativos")
+        else:
+            _cc1, _cc2 = st.columns(2)
+            with _cc1:
+                _metric_type = st.selectbox("Metrica",
+                    ["Precio (Normalizado)", "P/E Ratio", "Dividend Yield", "Market Cap", "ROE", "Beta", "Profit Margin"],
+                    key="chart_metric_select")
+            with _cc2:
+                _chart_period = st.selectbox("Periodo",
+                    ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                    index=3,
+                    key="chart_period_select")
+
+            if _metric_type == "Precio (Normalizado)":
+                # Download historical prices and normalize to base 100
+                with st.spinner("Descargando precios..."):
+                    _chart_data = yf.download(_chart_tickers[:15], period=_chart_period, progress=False)
+                    if not _chart_data.empty:
+                        # Handle MultiIndex columns from yfinance
+                        if isinstance(_chart_data.columns, pd.MultiIndex):
+                            _close = _chart_data['Close']
+                            if isinstance(_close, pd.Series):
+                                _close = _close.to_frame(name=_chart_tickers[0])
+                        else:
+                            _close = _chart_data[['Close']] if 'Close' in _chart_data.columns else _chart_data
+                            if isinstance(_close, pd.Series):
+                                _close = _close.to_frame(name=_chart_tickers[0])
+                            elif len(_chart_tickers) == 1:
+                                _close.columns = [_chart_tickers[0]]
+
+                        # Drop NaN columns and rows
+                        _close = _close.dropna(axis=1, how='all').dropna()
+
+                        if _close.empty:
+                            st.warning("No se pudieron obtener datos de precios")
+                        else:
+                            # Flatten column names if tuples
+                            _close.columns = [c[0] if isinstance(c, tuple) else str(c) for c in _close.columns]
+
+                            # Normalize to base 100
+                            _normalized = _close / _close.iloc[0] * 100
+
+                            _fig_norm = go.Figure()
+                            _colors_list = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+                                            '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
+                                            '#14b8a6', '#e11d48', '#a855f7', '#22c55e', '#eab308']
+
+                            for _i, _col in enumerate(_normalized.columns):
+                                _fig_norm.add_trace(go.Scatter(
+                                    x=_normalized.index,
+                                    y=_normalized[_col],
+                                    name=str(_col),
+                                    line=dict(color=_colors_list[_i % len(_colors_list)], width=2)
+                                ))
+
+                        _fig_norm.update_layout(**dark_layout(
+                            title="Precio Normalizado (Base 100)",
+                            yaxis_title="Base 100",
+                            height=500,
+                            hovermode='x unified'
+                        ))
+                        st.plotly_chart(_fig_norm, use_container_width=True)
+                    else:
+                        st.warning("No se pudieron obtener datos de precios")
+            else:
+                # Fundamental metric comparison - bar chart
+                _metric_map = {
+                    "P/E Ratio": "trailingPE",
+                    "Dividend Yield": "dividendYield",
+                    "Market Cap": "marketCap",
+                    "ROE": "returnOnEquity",
+                    "Beta": "beta",
+                    "Profit Margin": "profitMargins",
+                }
+                _yf_key = _metric_map.get(_metric_type, "trailingPE")
+
+                from cache_utils import get_ticker_info
+
+                _values = {}
+                with st.spinner(f"Obteniendo {_metric_type}..."):
+                    for _t in _chart_tickers[:15]:
+                        try:
+                            _info = get_ticker_info(_t)
+                            _val = _info.get(_yf_key, None)
+                            if _val is not None:
+                                # Scale percentages
+                                if _yf_key in ['dividendYield', 'returnOnEquity', 'profitMargins']:
+                                    _val = _val * 100
+                                elif _yf_key == 'marketCap':
+                                    _val = _val / 1e9  # To billions
+                                _values[_t] = _val
+                        except Exception:
+                            pass
+
+                if _values:
+                    _tickers_sorted = sorted(_values.keys(), key=lambda x: _values[x], reverse=True)
+                    _fig_bar = go.Figure()
+                    _fig_bar.add_trace(go.Bar(
+                        x=_tickers_sorted,
+                        y=[_values[_t] for _t in _tickers_sorted],
+                        marker_color=['#3b82f6' if _values[_t] >= 0 else '#ef4444' for _t in _tickers_sorted],
+                        text=[f"{_values[_t]:.2f}" for _t in _tickers_sorted],
+                        textposition='outside'
+                    ))
+
+                    _suffix = ""
+                    if _yf_key in ['dividendYield', 'returnOnEquity', 'profitMargins']:
+                        _suffix = " (%)"
+                    elif _yf_key == 'marketCap':
+                        _suffix = " ($B)"
+
+                    _fig_bar.update_layout(**dark_layout(
+                        title=f"{_metric_type}{_suffix} — Comparacion Watchlist",
+                        yaxis_title=f"{_metric_type}{_suffix}",
+                        height=450
+                    ))
+                    st.plotly_chart(_fig_bar, use_container_width=True)
+                else:
+                    st.warning(f"No se encontraron datos de {_metric_type}")

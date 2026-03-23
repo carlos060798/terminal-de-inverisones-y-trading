@@ -181,6 +181,13 @@ def init_db():
         )
     """)
 
+    # Migration: add list_name column to watchlist
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN list_name TEXT DEFAULT 'Principal'")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+
     # Migration: add post-mortem columns to trades
     for col in ["lecciones", "errores"]:
         try:
@@ -220,12 +227,12 @@ def init_db():
 
 # ── WATCHLIST ──────────────────────────────────────────────────────────────────
 def add_ticker(ticker: str, shares: float = 0, avg_cost: float = 0,
-               sector: str = "", notes: str = ""):
+               sector: str = "", notes: str = "", list_name: str = "Principal"):
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO watchlist (ticker, shares, avg_cost, sector, notes) VALUES (?,?,?,?,?)",
-            (ticker.upper(), shares, avg_cost, sector, notes)
+            "INSERT OR IGNORE INTO watchlist (ticker, shares, avg_cost, sector, notes, list_name) VALUES (?,?,?,?,?,?)",
+            (ticker.upper(), shares, avg_cost, sector, notes, list_name)
         )
         conn.commit()
     finally:
@@ -242,6 +249,38 @@ def remove_ticker(ticker: str):
 def get_watchlist() -> pd.DataFrame:
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", conn)
+    conn.close()
+    return df
+
+
+def get_watchlist_lists():
+    """Get all distinct list names from watchlist"""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT list_name FROM watchlist ORDER BY list_name")
+    lists = [row[0] for row in c.fetchall() if row[0]]
+    conn.close()
+    if not lists:
+        lists = ['Principal']
+    return lists
+
+
+def move_ticker_to_list(ticker, list_name):
+    """Move a ticker to a different list"""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE watchlist SET list_name = ? WHERE ticker = ?", (list_name, ticker))
+    conn.commit()
+    conn.close()
+
+
+def get_watchlist_by_list(list_name=None):
+    """Get watchlist filtered by list name"""
+    conn = get_connection()
+    if list_name and list_name != 'Todas':
+        df = pd.read_sql("SELECT * FROM watchlist WHERE list_name = ? ORDER BY added_at DESC", conn, params=(list_name,))
+    else:
+        df = pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", conn)
     conn.close()
     return df
 

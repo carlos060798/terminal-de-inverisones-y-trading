@@ -2532,6 +2532,138 @@ def render():
             except Exception as _e_a1:
                 st.warning(f"Error generando waterfall: {_e_a1}")
 
+        # ── AI Chart Analysis (PatternPy + Gemini Vision) ──
+        with st.expander("🔬 AI Chart Analysis (PatternPy + Gemini Vision)", expanded=False):
+            st.markdown("**Analisis tecnico avanzado con IA y reconocimiento de patrones**")
+
+            if st.button("🚀 Ejecutar Analisis AI del Grafico", key="btn_ai_chart"):
+                with st.spinner("Analizando grafico..."):
+                    import yfinance as _yf_chart
+
+                    # Get 6 months of data
+                    df_chart = _yf_chart.download(ticker_solo, period="6mo", interval="1d", progress=False)
+                    if df_chart.empty:
+                        st.error("No se pudieron obtener datos")
+                    else:
+                        # Flatten MultiIndex if needed (yfinance returns MultiIndex for single ticker too)
+                        if isinstance(df_chart.columns, pd.MultiIndex):
+                            df_chart.columns = df_chart.columns.get_level_values(0)
+
+                        patterns_found = []
+
+                        # -- Part A: PatternPy Pattern Detection --
+                        try:
+                            import patternpy
+                            _HAS_PATTERNPY = True
+                        except ImportError:
+                            _HAS_PATTERNPY = False
+
+                        if _HAS_PATTERNPY:
+                            st.markdown("### PatternPy — Patrones Detectados")
+                            try:
+                                sr = patternpy.detect_support_resistance(df_chart)
+                                if sr is not None and len(sr) > 0:
+                                    patterns_found.append(f"Soporte/Resistencia: {len(sr)} niveles detectados")
+
+                                try:
+                                    hs = patternpy.detect_head_shoulder(df_chart)
+                                    if hs is not None:
+                                        patterns_found.append("Head & Shoulders detectado")
+                                except Exception:
+                                    pass
+
+                                try:
+                                    dt = patternpy.detect_double_top(df_chart)
+                                    if dt is not None:
+                                        patterns_found.append("Double Top detectado")
+                                except Exception:
+                                    pass
+
+                                try:
+                                    _db = patternpy.detect_double_bottom(df_chart)
+                                    if _db is not None:
+                                        patterns_found.append("Double Bottom detectado")
+                                except Exception:
+                                    pass
+
+                                if patterns_found:
+                                    for _p in patterns_found:
+                                        _emoji = "🟢" if "bottom" in _p.lower() or "soporte" in _p.lower() else "🔴" if "top" in _p.lower() or "shoulder" in _p.lower() else "🔵"
+                                        st.markdown(f"{_emoji} **{_p}**")
+                                else:
+                                    st.info("No se detectaron patrones chartistas significativos")
+
+                            except Exception as _e_pp:
+                                st.warning(f"PatternPy: {_e_pp}")
+                        else:
+                            st.info("Instala `m-patternpy` para deteccion automatica de patrones")
+
+                        # -- Part B: Create Chart & Send to Gemini Vision --
+                        st.markdown("### Analisis Visual con Gemini AI")
+
+                        # Create candlestick chart
+                        _fig_ai = go.Figure()
+                        _fig_ai.add_trace(go.Candlestick(
+                            x=df_chart.index,
+                            open=df_chart['Open'],
+                            high=df_chart['High'],
+                            low=df_chart['Low'],
+                            close=df_chart['Close'],
+                            name=ticker_solo
+                        ))
+
+                        # Add volume as bar chart on secondary y-axis
+                        _fig_ai.add_trace(go.Bar(
+                            x=df_chart.index,
+                            y=df_chart['Volume'],
+                            name='Volumen',
+                            marker_color='rgba(59,130,246,0.3)',
+                            yaxis='y2'
+                        ))
+
+                        # Add 20 and 50 day MAs
+                        if len(df_chart) >= 20:
+                            _fig_ai.add_trace(go.Scatter(
+                                x=df_chart.index,
+                                y=df_chart['Close'].rolling(20).mean(),
+                                name='MA20',
+                                line=dict(color='#f59e0b', width=1)
+                            ))
+                        if len(df_chart) >= 50:
+                            _fig_ai.add_trace(go.Scatter(
+                                x=df_chart.index,
+                                y=df_chart['Close'].rolling(50).mean(),
+                                name='MA50',
+                                line=dict(color='#8b5cf6', width=1)
+                            ))
+
+                        _fig_ai.update_layout(
+                            **dark_layout(
+                                title=f"{ticker_solo} — 6 Meses",
+                                yaxis2=dict(overlaying='y', side='right', showgrid=False,
+                                            range=[0, df_chart['Volume'].max() * 4]),
+                                xaxis_rangeslider_visible=False,
+                                height=500
+                            )
+                        )
+
+                        st.plotly_chart(_fig_ai, use_container_width=True)
+
+                        # Export chart to PNG and send to Gemini
+                        try:
+                            _img_bytes = _fig_ai.to_image(format="png", width=1200, height=600, engine="kaleido")
+
+                            from ai_engine import analyze_chart_image
+                            _patterns_text = "; ".join(patterns_found) if patterns_found else ""
+                            _ai_chart_analysis = analyze_chart_image(_img_bytes, ticker_solo, _patterns_text)
+
+                            st.markdown("---")
+                            st.markdown(_ai_chart_analysis)
+
+                        except Exception as _e_export:
+                            st.warning(f"No se pudo exportar grafico para analisis visual: {_e_export}")
+                            st.info("Asegurate de tener `kaleido` instalado: pip install kaleido")
+
         # ── AI ANALYSIS (standalone) ──
         st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)
         providers = ai_engine.get_available_providers()

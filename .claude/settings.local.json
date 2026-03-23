@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_start",
+      "Bash(where py:*)",
+      "Bash(py -3 -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(py -3 -c \"import fitz; print\\(''PyMuPDF version:'', fitz.version\\)\")",
+      "Bash(py -3 -c \":*)",
+      "Bash(\"C:\\\\Users\\\\usuario\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \"import ast; ast.parse\\(open\\(''app.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(\"C:\\\\Users\\\\usuario\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \":*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install deep-translator)",
+      "Bash(where python3:*)",
+      "Read(//c/Users/usuario/AppData/Local/Programs/Python/**)",
+      "Bash(ls \"C:/Python\"*/python.exe)",
+      "Bash(python3 -m pip install deep-translator)",
+      "Bash(where.exe streamlit:*)",
+      "Bash(where.exe pip:*)",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -m pip install deep-translator)",
+      "Bash(MSYS_NO_PATHCONV=1 cmd.exe //c \"schtasks /create /sc DAILY /tn QuantumRetailBackup /tr \"\"C:\\\\Users\\\\usuario\\\\Videos\\\\dasboard\\\\backup_auto.bat\"\" /st 23:00 /f\")",
+      "Bash(MSYS_NO_PATHCONV=1 cmd.exe /c schtasks.exe /create /sc DAILY /tn QuantumRetailBackup /tr \"C:\\\\Users\\\\usuario\\\\Videos\\\\dasboard\\\\backup_auto.bat\" /st 23:00 /f)",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -m pip install fredapi finvizfinance)",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -c \"import ast; ast.parse\\(open\\(''sections/stock_analyzer.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''stock_analyzer.py: OK''\\)\")",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -c \"import ast; ast.parse\\(open\\(''sections/macro_context.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''macro_context.py: OK''\\)\")",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -c \"import ast; ast.parse\\(open\\(''app.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''app.py: OK''\\)\")",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -c \"import ast; ast.parse\\(open\\(''sections/watchlist.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''watchlist.py: OK''\\)\")",
+      "Bash(\"C:/Users/usuario/AppData/Local/Programs/Python/Python313/python.exe\" -c \"import ast; ast.parse\\(open\\(''valuation.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''valuation.py: OK''\\)\")"
+    ]
+  }
+}

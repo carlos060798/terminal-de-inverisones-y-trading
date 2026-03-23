@@ -22,3 +22,5 @@ joblib>=1.3.0
 requests>=2.31.0
 streamlit-antd-components
 kaleido>=0.2.1
+m-patternpy
+huggingface_hub>=0.20.0
