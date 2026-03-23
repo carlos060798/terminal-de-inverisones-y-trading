@@ -24,7 +24,7 @@ Thumbs.db
 desktop.ini
 
 # Streamlit (keep .streamlit/config.toml for cloud deploy)
-# .streamlit/secrets.toml  ← never commit secrets
+.streamlit/secrets.toml
 
 # Logs
 *.log
