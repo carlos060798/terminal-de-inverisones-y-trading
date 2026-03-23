@@ -303,3 +303,88 @@ def analyze_ticker(ticker):
         }
     except Exception:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# LOCAL NEURAL NETWORKS — No API, no limits
+# ═══════════════════════════════════════════════════════════════
+
+# ── XGBoost (optional upgrade for SmartScorer) ──
+try:
+    import xgboost as xgb
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+
+# ── Prophet (time series forecasting) ──
+try:
+    from prophet import Prophet
+    HAS_PROPHET = True
+except ImportError:
+    HAS_PROPHET = False
+
+# ── GARCH (volatility forecasting) ──
+try:
+    from arch import arch_model
+    HAS_GARCH = True
+except ImportError:
+    HAS_GARCH = False
+
+
+def forecast_price(ticker: str, days: int = 30):
+    """Prophet: project price forward N days. Returns DataFrame or None."""
+    if not HAS_PROPHET:
+        return None
+    try:
+        import yfinance as yf
+        import pandas as pd
+        hist = yf.download(ticker, period="2y", progress=False)
+        if hist.empty:
+            return None
+        # Handle MultiIndex
+        if isinstance(hist.columns, pd.MultiIndex):
+            close = hist["Close"].iloc[:, 0]
+        else:
+            close = hist["Close"]
+        close = close.dropna()
+        df = pd.DataFrame({"ds": close.index.tz_localize(None), "y": close.values})
+        m = Prophet(daily_seasonality=False, yearly_seasonality=True,
+                    weekly_seasonality=True, changepoint_prior_scale=0.05)
+        m.fit(df)
+        future = m.make_future_dataframe(periods=days)
+        forecast = m.predict(future)
+        return forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(days)
+    except Exception:
+        return None
+
+
+def forecast_volatility(ticker: str, days: int = 30):
+    """GARCH(1,1): forecast volatility. Returns dict or None."""
+    if not HAS_GARCH:
+        return None
+    try:
+        import yfinance as yf
+        import pandas as pd
+        hist = yf.download(ticker, period="2y", progress=False)
+        if hist.empty:
+            return None
+        if isinstance(hist.columns, pd.MultiIndex):
+            close = hist["Close"].iloc[:, 0]
+        else:
+            close = hist["Close"]
+        returns = close.pct_change().dropna() * 100
+        if len(returns) < 100:
+            return None
+        model = arch_model(returns, vol="Garch", p=1, q=1, mean="constant")
+        res = model.fit(disp="off")
+        fcast = res.forecast(horizon=days)
+        current_vol = float(res.conditional_volatility.iloc[-1])
+        forecast_vol = float(fcast.variance.iloc[-1].mean() ** 0.5)
+        return {
+            "current_vol_daily": current_vol,
+            "forecast_vol_daily": forecast_vol,
+            "current_vol_annual": current_vol * (252 ** 0.5),
+            "forecast_vol_annual": forecast_vol * (252 ** 0.5),
+        }
+    except Exception:
+        return None

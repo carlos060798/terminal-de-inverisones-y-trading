@@ -97,11 +97,26 @@ def render():
         checks.append(("FRED API", "Macro económico", ok, lat))
 
     with st.spinner("Verificando IA…"):
-        ai_providers = _check_ai_providers()
-
-    for name in ["Gemini", "Groq", "OpenRouter"]:
-        is_ok = name.lower() in [p.lower() for p in ai_providers]
-        checks.append((name, "Motor IA", is_ok, 0))
+        try:
+            from ai_engine import get_usage_dashboard
+            ai_dashboard = get_usage_dashboard()
+            # Group by backend to show one line per backend
+            backends_seen = set()
+            for p in ai_dashboard:
+                backend = p.get("backend", "?")
+                if backend in backends_seen:
+                    continue
+                backends_seen.add(backend)
+                name_map = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq",
+                            "deepseek": "DeepSeek", "openrouter": "OpenRouter", "hf": "HuggingFace"}
+                display_name = name_map.get(backend, backend)
+                is_ok = p.get("available", False)
+                checks.append((display_name, "Motor IA", is_ok, 0))
+        except Exception:
+            ai_providers = _check_ai_providers()
+            for name in ["Gemini", "Groq", "OpenRouter"]:
+                is_ok = name.lower() in [p.lower() for p in ai_providers]
+                checks.append((name, "Motor IA", is_ok, 0))
 
     # Display as table
     for name, category, ok, latency in checks:

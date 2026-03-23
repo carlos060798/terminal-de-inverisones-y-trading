@@ -104,16 +104,25 @@ def render():
 
     # ── Provider Status ──
     with st.expander("Estado de Providers AI Vision", expanded=False):
-        from ai_engine import get_available_providers, _get_secret
-        c1, c2 = st.columns(2)
-        with c1:
-            gemini_ok = bool(_get_secret("GEMINI_API_KEY"))
-            st.markdown(f"**Gemini Vision**: {'🟢 Activo' if gemini_ok else '🔴 Sin API key'}")
-        with c2:
-            hf_ok = bool(_get_secret("HF_TOKEN") or _get_secret("HUGGINGFACE_TOKEN"))
-            st.markdown(f"**HF Qwen2.5-VL**: {'🟢 Activo' if hf_ok else '🔴 Sin token'}")
-        if not gemini_ok and not hf_ok:
-            st.error("Configura al menos GEMINI_API_KEY o HF_TOKEN en secrets para usar AI Vision")
+        try:
+            from ai_engine import get_usage_dashboard
+            providers_data = get_usage_dashboard()
+            vision_providers = [p for p in providers_data if p.get("vision")]
+            if vision_providers:
+                for p in vision_providers:
+                    status = "🟢" if p.get("available") else "🔴"
+                    used = p.get("used", 0)
+                    limit = p.get("limit", 0)
+                    pct = p.get("pct", 0)
+                    bar_color = "#10b981" if pct < 50 else "#f59e0b" if pct < 80 else "#ef4444"
+                    st.markdown(f"""{status} **{p.get('name', p.get('id','?'))}** — {used}/{limit} req
+                    <div style='background:#1e293b;border-radius:4px;height:8px;margin:4px 0 8px 0;'>
+                        <div style='background:{bar_color};height:100%;border-radius:4px;width:{min(pct,100):.0f}%;'></div>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.warning("No hay providers de vision disponibles")
+        except Exception as e:
+            st.error(f"Error cargando providers: {e}")
         st.markdown("""
         **Configuracion**: Agrega las keys en `.streamlit/secrets.toml`:
         ```
