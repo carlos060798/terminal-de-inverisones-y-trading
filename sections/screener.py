@@ -16,6 +16,12 @@ try:
 except ImportError:
     HAS_FINVIZ = False
 
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode
+    HAS_AGGRID = True
+except ImportError:
+    HAS_AGGRID = False
+
 AVAILABLE_METRICS = {
     "P/E Ratio": {"key": "trailingPE", "type": "range", "min": 0, "max": 200, "default": (0, 50), "step": 1.0, "format": "%.1f"},
     "Forward P/E": {"key": "forwardPE", "type": "range", "min": 0, "max": 200, "default": (0, 40), "step": 1.0, "format": "%.1f"},
@@ -358,23 +364,63 @@ def _render_yfinance_screener():
         available_cols = [c for c in display_cols if c in df.columns]
         df_show = df[available_cols].copy()
 
-        style_obj = df_show.style.map(score_color, subset=["Score"])
-        if "Quant" in df_show.columns:
-            style_obj = style_obj.map(quant_color, subset=["Quant"])
-        if "Piotroski" in df_show.columns:
-            style_obj = style_obj.map(piotroski_color, subset=["Piotroski"])
-        if "Altman Z" in df_show.columns:
-            style_obj = style_obj.map(altman_color, subset=["Altman Z"])
+        if HAS_AGGRID:
+            gb = GridOptionsBuilder.from_dataframe(df_show)
+            gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=25)
+            gb.configure_default_column(filterable=True, sortable=True, resizable=True)
+            gb.configure_column("Ticker", pinned="left", cellStyle={"fontWeight": "bold", "color": "#60A5FA"})
+            
+            # Format numbers
+            gb.configure_column("Precio", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : '$' + parseFloat(x).toFixed(2)")
+            gb.configure_column("P/E", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(1) + 'x'")
+            gb.configure_column("P/E Fwd", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(1) + 'x'")
+            gb.configure_column("D/E", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(2)")
+            gb.configure_column("PEG", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(2)")
+            gb.configure_column("Beta", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(2)")
+            gb.configure_column("Div %", type=["numericColumn", "numberColumnFilter"], valueFormatter="x == null ? '--' : parseFloat(x).toFixed(2) + '%'")
+            gb.configure_column("Vol Prom", type=["numericColumn"], valueFormatter="x == null ? '--' : (x >= 1e6 ? (x/1e6).toFixed(1) + 'M' : (x/1e3).toFixed(0) + 'K')")
+            
+            # Additional UI colors
+            jscode = """
+            function(params) {
+                if (params.data.Score >= 5) {
+                    return {'backgroundColor': 'rgba(52,211,153,0.15)', 'color': '#34d399'};
+                } else if (params.data.Score >= 3) {
+                    return {'backgroundColor': 'rgba(251,191,36,0.15)', 'color': '#fbbf24'};
+                } else {
+                    return {'backgroundColor': 'rgba(248,113,113,0.1)', 'color': '#f87171'};
+                }
+            }
+            """
+            
+            go_opts = gb.build()
+            AgGrid(
+                df_show,
+                gridOptions=go_opts,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
+                theme="alpine",
+                allow_unsafe_jscode=True,
+                height=500
+            )
 
-        st.dataframe(
-            style_obj.format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
-                            "D/E": "{:.2f}", "PEG": "{:.2f}", "Beta": "{:.2f}",
-                            "Div %": "{:.2f}%",
-                            "Vol Prom": lambda v: f"{v/1e6:.1f}M" if v and v > 1e6
-                                        else (f"{v/1e3:.0f}K" if v and v > 1e3 else "--")},
-                            na_rep="--"),
-            use_container_width=True, hide_index=True
-        )
+        else:
+            style_obj = df_show.style.map(score_color, subset=["Score"])
+            if "Quant" in df_show.columns:
+                style_obj = style_obj.map(quant_color, subset=["Quant"])
+            if "Piotroski" in df_show.columns:
+                style_obj = style_obj.map(piotroski_color, subset=["Piotroski"])
+            if "Altman Z" in df_show.columns:
+                style_obj = style_obj.map(altman_color, subset=["Altman Z"])
+
+            st.dataframe(
+                style_obj.format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
+                                "D/E": "{:.2f}", "PEG": "{:.2f}", "Beta": "{:.2f}",
+                                "Div %": "{:.2f}%",
+                                "Vol Prom": lambda v: f"{v/1e6:.1f}M" if v and v > 1e6
+                                            else (f"{v/1e3:.0f}K" if v and v > 1e3 else "--")},
+                                na_rep="--"),
+                use_container_width=True, hide_index=True
+            )
 
         # ── COMPARISON CHARTS ──
         st.markdown("<div class='sec-title'>Comparacion Visual</div>", unsafe_allow_html=True)
@@ -518,7 +564,23 @@ def _render_finviz_screener():
         else:
             k3.markdown(kpi("Precio Promedio", "--", "", "green"), unsafe_allow_html=True)
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        if HAS_AGGRID:
+            gb = GridOptionsBuilder.from_dataframe(df)
+            gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
+            gb.configure_default_column(filterable=True, sortable=True, resizable=True)
+            if "Ticker" in df.columns:
+                gb.configure_column("Ticker", pinned="left", cellStyle={"fontWeight": "bold", "color": "#60A5FA"})
+            
+            go_opts = gb.build()
+            AgGrid(
+                df,
+                gridOptions=go_opts,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
+                theme="alpine",
+                height=500
+            )
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
         # ── HEATMAP: P/E by Sector ──
         if "P/E" in df.columns and "Sector" in df.columns:

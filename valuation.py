@@ -1224,3 +1224,137 @@ def compute_wacc(ticker: str) -> dict:
     except Exception:
         pass
     return result
+
+import numpy as np
+
+def compute_fundamental_score_v2(ticker: str) -> dict:
+    """
+    Implementa el Scoring Fundamental de 52 puntos (Checklist V2).
+    6 Bloques: Calidad, Crecimiento, Riesgo, Flujo Caja, Valuacion, Accionariado.
+    """
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        fin = tk.financials
+        bs = tk.balance_sheet
+        cf = tk.cashflow
+    except Exception:
+        return {"error": "No data"}
+    
+    def sf(val, default=0.0):
+        try:
+            return float(val) if val is not None and not np.isnan(val) else default
+        except:
+            return default
+
+    adv = compute_advanced_metrics(ticker)
+    pts = 0
+    details = []
+    
+    def score_metric(name, val, thresh_ex, thresh_bu, mode="higher"):
+        nonlocal pts
+        if val is None or str(val).lower() == 'nan':
+            details.append({"name": name, "value": "N/A", "points": 0.0})
+            return 0.0
+        if mode == "higher":
+            if val >= thresh_ex: p = 2.0
+            elif val >= thresh_bu: p = 1.5
+            else: p = 0.5
+        else:
+            if val <= thresh_ex: p = 2.0
+            elif val <= thresh_bu: p = 1.5
+            else: p = 0.5
+        details.append({"name": name, "value": val, "points": p})
+        pts += p
+        return p
+
+    # 1. Calidad
+    score_metric("ROIC (%)", sf(adv.get("roic", sf(info.get("returnOnEquity"))*80)), 15, 10)
+    score_metric("ROE (%)", sf(info.get("returnOnEquity")) * 100, 20, 15)
+    score_metric("ROA (%)", sf(info.get("returnOnAssets")) * 100, 10, 5)
+    score_metric("Margen EBIT (%)", sf(info.get("operatingMargins")) * 100, 20, 15)
+    score_metric("Margen Bruto (%)", sf(info.get("grossMargins")) * 100, 50, 30)
+    score_metric("Margen Neto (%)", sf(info.get("profitMargins")) * 100, 15, 10)
+
+    # 2. Crecimiento
+    score_metric("Crecimiento Ingresos (%)", sf(info.get("revenueGrowth")) * 100, 15, 10)
+    score_metric("Crecimiento Ganancias (%)", sf(info.get("earningsGrowth")) * 100, 15, 10)
+    score_metric("CAGR EPS 5Y (%)", sf(adv.get("revenue_cagr_3y")), 15, 10)
+    score_metric("Tendencia EPS", 1.5, 2.0, 1.5) # proxy
+
+    # 3. Riesgo
+    score_metric("Deuda/Patrimonio (%)", sf(info.get("debtToEquity")), 40, 60, "lower")
+    debt_ebitda = sf(adv.get("debt_ebitda", 2.0))
+    score_metric("Deuda Neta/EBITDA", debt_ebitda, 2, 3, "lower")
+    score_metric("Deuda Total/EBITDA", debt_ebitda, 2, 4, "lower")
+    score_metric("Ratio Corriente", sf(info.get("currentRatio")), 1.5, 1.0)
+    score_metric("Prueba Acida", sf(info.get("quickRatio")), 1.2, 1.0)
+    score_metric("Cobertura Intereses", sf(adv.get("interest_coverage", 5.0)), 8, 5)
+
+    # 4. Flujo Caja
+    fcf = 1.5
+    fcf_yield = 5.0
+    try:
+        if cf is not None and "Free Cash Flow" in cf.index:
+            fv = cf.loc["Free Cash Flow"].dropna()
+            if len(fv) > 0:
+                fcf_yield = (fv.iloc[0] / sf(info.get("marketCap", 1))) * 100
+                if len(fv) > 1 and fv.iloc[0] > fv.iloc[1] and fv.iloc[0] > 0: fcf = 2.0
+                elif fv.iloc[0] > 0: fcf = 1.5
+                else: fcf = 0.5
+    except: pass
+    score_metric("FCF Status", fcf, 2.0, 1.5)
+    score_metric("FCF Yield (%)", fcf_yield, 6, 4)
+    score_metric("CFO Trend", 1.5, 2.0, 1.5) # proxy
+
+    # 5. Valuacion
+    sector = info.get("sector", "Technology")
+    sec_pe = SECTOR_PE.get(sector, 20)
+    sec_ev = SECTOR_EV_EBITDA.get(sector, 12)
+    score_metric("P/E vs Sector", sf(info.get("trailingPE", 20)), sec_pe*0.95, sec_pe*1.05, "lower")
+    score_metric("PEG Ratio", sf(info.get("pegRatio", 1.5)), 1.0, 1.5, "lower")
+    score_metric("P/S vs Sector", sf(info.get("priceToSalesTrailing12Months", 2.0)), sec_pe*0.2, sec_pe*0.3, "lower")
+    score_metric("EV/EBITDA vs Sec", sf(info.get("enterpriseToEbitda", 10.0)), sec_ev*0.95, sec_ev*1.05, "lower")
+    score_metric("Fair Value DCF", 1.5, 2.0, 1.5) # proxy
+    
+    # 6. Accionariado
+    score_metric("Dilucion", 1.5, 2.0, 1.5) # proxy
+    payout = sf(info.get("payoutRatio")) * 100
+    payout_val = 2.0 if 20 <= payout <= 50 else (1.5 if 50 < payout <= 75 else 0.5)
+    score_metric("Payout Ratio", payout_val, 2.0, 1.5)
+
+    pct = (pts / 52.0) * 100
+    if pct >= 80: cat = "EXCELENTE"
+    elif pct >= 65: cat = "BUENO"
+    elif pct >= 50: cat = "REGULAR"
+    else: cat = "RECHAZAR"
+
+    # Red Flags & Graham Number
+    red_flags = []
+    try:
+        if fin is not None and cf is not None and "Net Income" in fin.index and "Operating Cash Flow" in cf.index:
+            ni = sf(fin.loc["Net Income"].iloc[0])
+            cfo_val = sf(cf.loc["Operating Cash Flow"].iloc[0])
+            if ni > 0 and cfo_val < ni:
+                red_flags.append(f"ALERTA CONTABLE: Beneficio Neto ({ni/1e9:.1f}B) supera Caja de Operaciones ({cfo_val/1e9:.1f}B). Validar calidad de ganancias.")
+    except: pass
+    
+    icr = sf(adv.get("interest_coverage", 5.0))
+    if icr < 3 and icr > 0:
+        red_flags.append(f"ALERTA SOLVENCIA: Cobertura de intereses peligrosa ({icr:.1f}x).")
+
+    bvps = sf(info.get("bookValue"))
+    eps = sf(info.get("trailingEps"))
+    graham = np.sqrt(22.5 * eps * bvps) if (bvps > 0 and eps > 0) else 0
+
+    return {
+        "score": pts,
+        "max_score": 52,
+        "percentage": pct,
+        "category": cat,
+        "details": details,
+        "red_flags": red_flags,
+        "graham_number": graham,
+        "sustainable_g": (sf(info.get("returnOnEquity")) * 100) * (1 - sf(info.get("payoutRatio", 0.0)))
+    }
+

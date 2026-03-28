@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import os
+import diskcache
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from typing import Dict, List, Optional
 
@@ -38,27 +40,18 @@ PRIORITY_THREADS: Dict[str, int] = {
     "batch":    1,
 }
 
-# Module-level result cache shared across Streamlit reruns
-# Key: provider_id, Value: (DataResult, timestamp)
-_RESULT_CACHE: Dict[str, tuple[DataResult, float]] = {}
-_CACHE_LOCK = threading.Lock()
-
+# Persistent result cache (SQLite-backed) shareable across processes/reruns
+_CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache", "data_fabric")
+_DISK_CACHE = diskcache.Cache(_CACHE_DIR)
 
 def _cache_get(provider_id: str) -> Optional[DataResult]:
-    with _CACHE_LOCK:
-        entry = _RESULT_CACHE.get(provider_id)
-        if entry is None:
-            return None
-        result, stored_at = entry
-        age = time.monotonic() - stored_at
-        if age < result.ttl_seconds:
-            return result
-        return None
+    """Retrieve result from persistent disk cache."""
+    return _DISK_CACHE.get(provider_id)
 
 
 def _cache_set(result: DataResult) -> None:
-    with _CACHE_LOCK:
-        _RESULT_CACHE[result.provider_id] = (result, time.monotonic())
+    """Store result in persistent disk cache with TTL."""
+    _DISK_CACHE.set(result.provider_id, result, expire=result.ttl_seconds)
 
 
 class ExecutionEngine:

@@ -176,36 +176,94 @@ class SmartScorer:
             return {}
 
 
-# Singleton instances with Streamlit cache
-try:
-    import streamlit as _st
 
-    @_st.cache_resource
-    def get_models():
-        if not HAS_SKLEARN:
-            return None, None, None
-        return QualityClassifier(), AnomalyDetector(), SmartScorer()
-except ImportError:
-    # Fallback without Streamlit (testing, CLI)
-    _quality = None
-    _anomaly = None
-    _scorer = None
+class PeterLynchClassifier:
+    """Random Forest to classify stocks into Peter Lynch profiles (Stalwart, Fast Grower, etc)."""
+    def __init__(self):
+        try:
+            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.preprocessing import StandardScaler
+            self.model = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+            self.scaler = StandardScaler()
+            self.trained = False
+        except Exception:
+            self.model = None
+            self.scaler = None
+            self.trained = False
 
-    def get_models():
-        global _quality, _anomaly, _scorer
-        if not HAS_SKLEARN:
-            return None, None, None
-        if _quality is None:
-            _quality = QualityClassifier()
-            _anomaly = AnomalyDetector()
-            _scorer = SmartScorer()
-        return _quality, _anomaly, _scorer
+    def train(self, features_df):
+        """Heuristically label the SP100 data to train the RF model."""
+        try:
+            labels = []
+            for _, row in features_df.iterrows():
+                growth = row.get("rev_growth", 0)
+                div = row.get("div_yield", 0)
+                # Lynch logic rough heuristic for training
+                if growth > 0.15:
+                    labels.append("Fast Grower")
+                elif growth > 0.05:
+                    if div > 0.02:
+                        labels.append("Stalwart")
+                    else:
+                        labels.append("Cyclical")
+                else:
+                    labels.append("Slow Grower")
+
+            X = self.scaler.fit_transform(features_df)
+            self.model.fit(X, labels)
+            self.trained = True
+        except Exception:
+            self.trained = False
+
+    def predict(self, features_dict):
+        try:
+            if not self.trained:
+                return "Unknown", 0
+            df = import_pandas()(features_dict)
+            X = self.scaler.transform(df)
+            pred = self.model.predict(X)[0]
+            proba = max(self.model.predict_proba(X)[0])
+            return pred, round(proba * 100, 1)
+        except Exception:
+            return "Unknown", 0
+
+def import_pandas():
+    import pandas as pd
+    return lambda d: pd.DataFrame([d])
+
+
+    # Singleton instances with Streamlit cache
+    try:
+        import streamlit as _st
+
+        @_st.cache_resource
+        def get_models():
+            if not HAS_SKLEARN:
+                return None, None, None, None
+            return QualityClassifier(), AnomalyDetector(), SmartScorer(), PeterLynchClassifier()
+    except ImportError:
+        # Fallback without Streamlit
+        _quality = None
+        _anomaly = None
+        _scorer = None
+        _lynch = None
+
+        def get_models():
+            global _quality, _anomaly, _scorer, _lynch
+            if not HAS_SKLEARN:
+                return None, None, None, None
+            if _quality is None:
+                _quality = QualityClassifier()
+                _anomaly = AnomalyDetector()
+                _scorer = SmartScorer()
+                _lynch = PeterLynchClassifier()
+            return _quality, _anomaly, _scorer, _lynch
 
 
 def train_models(progress_callback=None):
     """Train all models using S&P 100 data. Call once per session."""
     try:
-        quality, anomaly, scorer = get_models()
+        quality, anomaly, scorer, lynch = get_models()
         if quality is None:
             return False
 
@@ -272,15 +330,17 @@ def train_models(progress_callback=None):
         quality.train(features_df, labels)
         anomaly.train(features_df)
         scorer.train(features_df, returns)
+        if lynch:
+            lynch.train(features_df)
         return True
     except Exception:
         return False
 
 
 def analyze_ticker(ticker):
-    """Run all 3 models on a ticker. Returns dict."""
+    """Run all 4 models on a ticker. Returns dict."""
     try:
-        quality, anomaly, scorer = get_models()
+        quality, anomaly, scorer, lynch = get_models()
         if quality is None or not quality.trained:
             return None
 
@@ -293,12 +353,18 @@ def analyze_ticker(ticker):
         smart_score = scorer.score(feat)
         importance = scorer.feature_importance()
 
+        lynch_label, lynch_conf = "Unknown", 0
+        if lynch and lynch.trained:
+            lynch_label, lynch_conf = lynch.predict(feat)
+
         return {
             'quality_label': label,
             'quality_confidence': confidence,
             'anomalies': anomalies,
             'smart_score': smart_score,
             'feature_importance': importance,
+            'lynch_profile': lynch_label,
+            'lynch_confidence': lynch_conf,
             'features': feat,
         }
     except Exception:

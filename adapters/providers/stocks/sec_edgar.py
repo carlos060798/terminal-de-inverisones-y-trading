@@ -1,39 +1,68 @@
-"""SEC EDGAR — sec-edgar-downloader + REST search (migrated from data_sources.py)"""
+"""SEC EDGAR — Integración con edgartools para fundamentales directos (10-K/10-Q)"""
 import pandas as pd
+from edgar import Company, set_identity
 from adapters.base import BaseDataAdapter, DataResult, ProviderConfig
-from adapters.mixins import RestMixin
 from adapters.registry import register
 
+# SEC requires an identity string (User-Agent) for all requests
+set_identity("QuantumTerminal User (admin@quantumterminal.ai)")
 
 @register
-class SecEdgarAdapter(RestMixin, BaseDataAdapter):
+class SecEdgarAdapter(BaseDataAdapter):
     config = ProviderConfig(
         provider_id="sec_edgar", category="stocks",
         credential_key="",
-        base_url="https://efts.sec.gov/LATEST/search-index",
-        rate_limit_rpm=10, ttl_seconds=3600, priority="medium",
+        rate_limit_rpm=10, ttl_seconds=86400, priority="medium", # TTL alto para fundamentales
     )
 
-    def _fetch_raw(self, ticker: str = "AAPL", form_type: str = "10-K", limit: int = 5, **kwargs):
-        resp = self._get(
-            "https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRange=custom&startdt=2020-01-01&forms={form_type}&hits.hits._source.period_of_report=true".format(
-                ticker=ticker, form_type=form_type
-            )
-        )
-        return resp.json().get("hits", {}).get("hits", [])[:limit]
+    def _fetch_raw(self, ticker: str = "AAPL", form_type: str = "10-K", year: int = None, **kwargs):
+        """Fetch real financial statements using edgartools."""
+        company = Company(ticker)
+        filings = company.get_filings(form=form_type)
+        
+        if not filings:
+            return None
+            
+        latest_filing = filings.latest()
+        # In edgartools, .obj() on a filing returns the Financials object for XBRL filings
+        financials = latest_filing.obj()
+        
+        # Extract sheets if available
+        data = {
+            "ticker": ticker,
+            "form": form_type,
+            "filed_at": latest_filing.filing_date,
+            "accession_number": latest_filing.accession_number,
+        }
+        
+        try:
+            # We try to get the balance sheet and income statement
+            if financials:
+                # edgartools Financials object attributes
+                balance_sheet = financials.balance_sheet
+                income_statement = financials.income_statement
+                cash_flow = financials.cash_flow
+                
+                if balance_sheet is not None:
+                    data["balance_sheet"] = balance_sheet.to_dataframe()
+                if income_statement is not None:
+                    data["income_statement"] = income_statement.to_dataframe()
+                if cash_flow is not None:
+                    data["cash_flow"] = cash_flow.to_dataframe()
+        except Exception as e:
+            data["error_extracting_financials"] = str(e)
+            
+        return data
 
     def _normalize(self, raw) -> DataResult:
-        rows = []
-        for hit in raw:
-            src = hit.get("_source", {})
-            rows.append({
-                "form_type": src.get("form_type"),
-                "filed_at":  src.get("file_date"),
-                "company":   src.get("display_names"),
-                "url":       "https://www.sec.gov/Archives/" + src.get("file_path", ""),
-            })
-        df = pd.DataFrame(rows)
+        if raw is None:
+            return self._empty_result("No filings found")
+            
         return DataResult(
-            provider_id="sec_edgar", category="stocks",
-            fetched_at="", latency_ms=0, success=True, data=df,
+            provider_id="sec_edgar", 
+            category="stocks",
+            fetched_at="", 
+            latency_ms=0, 
+            success=True, 
+            data=raw,
         )

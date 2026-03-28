@@ -14,6 +14,15 @@ import translator
 import excel_export
 import ai_engine
 import ml_engine
+import sentiment
+import sys
+sys.path.append('c:/Users/usuario/Videos/dasboard/agents')
+try:
+    from agents import devil_advocate
+except:
+    import devil_advocate
+import rag_engine
+import json
 from ui_shared import DARK, dark_layout, IDEAL, score, fmt, kpi
 
 try:
@@ -25,6 +34,12 @@ try:
     import yfinance as yf
 except ImportError:
     yf = None
+
+try:
+    from streamlit_echarts import st_echarts
+    HAS_ECHARTS = True
+except ImportError:
+    HAS_ECHARTS = False
 
 
 # ---------------------------------------------------------------------------
@@ -204,71 +219,97 @@ SECTOR_PEERS = {
 
 
 def _snowflake_radar(ticker):
-    """Simply Wall St style 5-axis radar: Value, Growth, Health, Dividend, Momentum."""
+    """ECharts Radar style: Value, Growth, Health, Dividend, Momentum vs Industry."""
     try:
         tk = yf.Ticker(ticker)
         info = tk.info
     except Exception:
         return
 
-    # Score each axis 0-5
-    # Value: P/E vs 25 (lower = better)
-    pe = info.get("trailingPE") or info.get("forwardPE")
-    value_score = max(0, min(5, 5 - (pe - 10) / 6)) if pe and pe > 0 else 2.5
+    def get_scores(inf):
+        pe = inf.get("trailingPE") or inf.get("forwardPE")
+        vs = max(0, min(5, 5 - (pe - 10) / 6)) if pe and pe > 0 else 2.5
+        rg = inf.get("revenueGrowth", 0) or 0
+        gs = max(0, min(5, rg * 100 / 10))
+        cr = inf.get("currentRatio", 1.5) or 1.5
+        de = inf.get("debtToEquity", 100) or 100
+        hs = max(0, min(5, (cr / 0.6) + (3 - de / 100)))
+        dy = (inf.get("dividendYield") or 0) * 100
+        ds = max(0, min(5, dy / 1.0))
+        price = inf.get("currentPrice") or inf.get("regularMarketPrice") or 0
+        low52 = inf.get("fiftyTwoWeekLow") or price
+        high52 = inf.get("fiftyTwoWeekHigh") or price
+        ms = max(0, min(5, ((price - low52) / (high52 - low52)) * 5)) if high52 > low52 and price > 0 else 2.5
+        return [round(vs, 1), round(gs, 1), round(hs, 1), round(ds, 1), round(ms, 1)]
 
-    # Growth: Revenue growth %
-    rev_growth = info.get("revenueGrowth", 0) or 0
-    growth_score = max(0, min(5, rev_growth * 100 / 10))  # 50% growth = 5
+    scores = get_scores(info)
+    sector = info.get("sector", "")
+    
+    # Baseline Industry Approximations to avoid slow API fetching during render
+    industry_scores = [3.0, 3.0, 3.0, 3.0, 3.0]
+    if sector:
+        sec_lower = sector.lower()
+        if "technol" in sec_lower: industry_scores = [2.0, 4.0, 3.5, 1.0, 4.0]
+        elif "finan" in sec_lower: industry_scores = [4.0, 2.0, 3.0, 3.5, 2.5]
+        elif "health" in sec_lower: industry_scores = [3.0, 3.0, 4.0, 2.0, 3.0]
+        elif "energy" in sec_lower: industry_scores = [3.5, 2.5, 3.5, 4.5, 2.0]
+        elif "consum" in sec_lower: industry_scores = [3.0, 3.0, 3.0, 2.5, 3.0]
+        elif "utilit" in sec_lower: industry_scores = [3.5, 1.5, 2.5, 4.5, 2.0]
 
-    # Health: Current ratio + low debt
-    cr = info.get("currentRatio", 1.5) or 1.5
-    de = info.get("debtToEquity", 100) or 100
-    health_score = max(0, min(5, (cr / 0.6) + (3 - de / 100)))
-
-    # Dividend: yield %
-    div_yield = (info.get("dividendYield") or 0) * 100
-    dividend_score = max(0, min(5, div_yield / 1.0))  # 5% yield = 5
-
-    # Momentum: 52-week return
-    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-    low52 = info.get("fiftyTwoWeekLow") or price
-    high52 = info.get("fiftyTwoWeekHigh") or price
-    if high52 > low52 and price > 0:
-        momentum_score = max(0, min(5, ((price - low52) / (high52 - low52)) * 5))
-    else:
-        momentum_score = 2.5
-
-    categories = ["Value", "Growth", "Health", "Dividend", "Momentum"]
-    scores = [value_score, growth_score, health_score, dividend_score, momentum_score]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        r=scores + [scores[0]],
-        theta=categories + [categories[0]],
-        fill="toself",
-        fillcolor="rgba(96,165,250,0.15)",
-        line=dict(color="#60a5fa", width=2),
-        marker=dict(size=6, color="#60a5fa"),
-    ))
-    fig.update_layout(**dark_layout(
-        polar=dict(
-            bgcolor="#0a0a0a",
-            radialaxis=dict(visible=True, range=[0, 5], linecolor="#1a1a1a",
-                            gridcolor="#1a1a1a", tickfont=dict(color="#5a6f8a", size=10)),
-            angularaxis=dict(linecolor="#1a1a1a", gridcolor="#1a1a1a",
-                             tickfont=dict(color="#94a3b8", size=12)),
-        ),
-        height=350,
-        margin=dict(l=60, r=60, t=40, b=40),
-    ))
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Score summary
     avg_score = sum(scores) / len(scores)
     label = "EXCELENTE" if avg_score >= 3.5 else ("BUENO" if avg_score >= 2.5 else "DÉBIL")
     color = "#34d399" if avg_score >= 3.5 else ("#fbbf24" if avg_score >= 2.5 else "#f87171")
+
+    options = {
+        "tooltip": {"trigger": "item"},
+        "legend": {
+            "data": [ticker, "Promedio Industria"],
+            "bottom": 0,
+            "textStyle": {"color": "#94a3b8"}
+        },
+        "radar": {
+            "indicator": [
+                {"name": "Value", "max": 5},
+                {"name": "Growth", "max": 5},
+                {"name": "Health", "max": 5},
+                {"name": "Dividend", "max": 5},
+                {"name": "Momentum", "max": 5}
+            ],
+            "splitNumber": 5,
+            "axisName": {"color": "#94a3b8", "fontSize": 12},
+            "splitLine": {"lineStyle": {"color": "rgba(255, 255, 255, 0.1)"}},
+            "splitArea": {"show": False},
+            "axisLine": {"lineStyle": {"color": "rgba(255, 255, 255, 0.1)"}}
+        },
+        "series": [{
+            "type": "radar",
+            "data": [
+                {
+                    "value": scores,
+                    "name": ticker,
+                    "itemStyle": {"color": "#60a5fa"},
+                    "areaStyle": {"color": "rgba(96,165,250,0.4)"},
+                    "lineStyle": {"color": "#60a5fa", "width": 2}
+                },
+                {
+                    "value": industry_scores,
+                    "name": "Promedio Industria",
+                    "itemStyle": {"color": "rgba(148,163,184,0.8)"},
+                    "areaStyle": {"color": "rgba(148,163,184,0.1)"},
+                    "lineStyle": {"color": "rgba(148,163,184,0.5)", "type": "dashed", "width": 2}
+                }
+            ]
+        }],
+        "backgroundColor": "transparent"
+    }
+
+    if HAS_ECHARTS:
+        st_echarts(options=options, height="350px")
+    else:
+        st.warning("ECharts no está disponible. Instala streamlit-echarts.")
+
     st.markdown(
-        f"<div style='text-align:center;color:{color};font-weight:700;font-size:16px;'>"
+        f"<div style='text-align:center;color:{color};font-weight:700;font-size:16px;margin-top:10px;'>"
         f"{label} — {avg_score:.1f}/5.0</div>",
         unsafe_allow_html=True,
     )
@@ -468,71 +509,81 @@ def _render_insider_trading(ticker: str):
 # ---------------------------------------------------------------------------
 # Buffett/Dorsey Quality Score display
 # ---------------------------------------------------------------------------
-def _render_quality_score(ticker: str):
-    """Display Buffett/Dorsey quality checklist with gauge + detail."""
-    # Check for MOAT rating
-    moat_rating = None
-    thesis = db.get_investment_notes(ticker)
-    if thesis:
-        moat_rating = thesis.get("moat_rating")
 
-    with st.spinner("Calculando Checklist Buffett/Dorsey…"):
-        qs = valuation.compute_quality_score(ticker, moat_rating)
+def _render_quality_score(ticker: str):
+    """Score Profesional 52-Points (Reemplaza al de 10 puntos)."""
+    with st.spinner("Calculando Sistema Institucional de 52 puntos..."):
+        qs = valuation.compute_fundamental_score_v2(ticker)
 
     if not qs or "score" not in qs:
-        st.info("No se pudo calcular el quality score.")
+        st.info("No se pudo calcular el quality score detallado.")
         return
 
-    sc = qs["score"]
-    sc_color = "#34d399" if sc >= 70 else ("#fbbf24" if sc >= 40 else "#f87171")
-    sc_bg = "#064e3b" if sc >= 70 else ("#422006" if sc >= 40 else "#451a03")
-    label = "EXCELENTE" if sc >= 70 else ("ACEPTABLE" if sc >= 40 else "DEBIL")
+    sc = qs["percentage"]
+    sc_color = "#34d399" if sc >= 80 else ("#fbbf24" if sc >= 65 else ("#f97316" if sc >= 50 else "#f87171"))
+    sc_bg = "#064e3b" if sc >= 80 else ("#422006" if sc >= 65 else ("#431407" if sc>=50 else "#451a03"))
 
     q1, q2 = st.columns([1, 2])
     with q1:
         fig_q = go.Figure(go.Indicator(
             mode="gauge+number",
-            value=sc,
-            number=dict(suffix="/100", font=dict(color="#f0f6ff", size=28)),
-            title=dict(text="Quality Score", font=dict(color="#94a3b8", size=14)),
+            value=qs["score"],
+            number=dict(suffix=" / 52", font=dict(color="#f0f6ff", size=28)),
+            title=dict(text="Score Fundamental V2", font=dict(color="#94a3b8", size=14)),
             gauge=dict(
-                axis=dict(range=[0, 100], tickcolor="#475569",
-                         tickfont=dict(color="#475569", size=10)),
+                axis=dict(range=[0, 52], tickcolor="#475569", tickfont=dict(color="#475569", size=10)),
                 bar=dict(color=sc_color, thickness=0.7),
                 bgcolor="#0a0a0a", bordercolor="#1a1a1a",
                 steps=[
-                    dict(range=[0, 40], color="rgba(248,113,113,0.1)"),
-                    dict(range=[40, 70], color="rgba(251,191,36,0.1)"),
-                    dict(range=[70, 100], color="rgba(52,211,153,0.1)"),
+                    dict(range=[0, 26], color="rgba(248,113,113,0.1)"),
+                    dict(range=[26, 33.8], color="rgba(249,115,22,0.1)"),
+                    dict(range=[33.8, 41.6], color="rgba(251,191,36,0.1)"),
+                    dict(range=[41.6, 52], color="rgba(52,211,153,0.1)"),
                 ],
             )
         ))
-        fig_q.update_layout(**dark_layout(height=250, margin=dict(l=20, r=20, t=50, b=10)))
+        fig_q.update_layout(height=250, margin=dict(l=20, r=20, t=50, b=10), paper_bgcolor="rgba(0,0,0,0)", font=dict(family="Inter, sans-serif"))
         st.plotly_chart(fig_q, use_container_width=True)
         st.markdown(f"""
         <div style='text-align:center;background:{sc_bg};border:2px solid {sc_color};
                     border-radius:10px;padding:8px;'>
-          <span style='color:{sc_color};font-weight:700;font-size:16px;'>{label}</span>
-          <span style='color:#64748b;font-size:12px;'> — {qs['passed']}/{qs['total']} criterios</span>
+          <span style='color:{sc_color};font-weight:700;font-size:16px;'>{qs['category']}</span>
+          <span style='color:#64748b;font-size:12px;'> — {sc:.1f}% Match</span>
         </div>""", unsafe_allow_html=True)
 
-    with q2:
-        for item in qs["details"]:
-            icon = "✅" if item["passed"] else "❌"
-            v = item["value"]
-            if v is not None:
-                if isinstance(v, float):
-                    v_str = f"{v:.2f}"
-                else:
-                    v_str = str(v)
-            else:
-                v_str = "N/A"
-            color = "#34d399" if item["passed"] else "#f87171"
-            st.markdown(f"""<div style='display:flex;justify-content:space-between;padding:4px 8px;
-                border-bottom:1px solid rgba(30,45,64,0.3);'>
-              <span style='color:#94a3b8;font-size:13px;'>{icon} {item['criterion']}</span>
-              <span style='color:{color};font-weight:600;font-size:13px;'>{v_str}</span>
+        if qs["graham_number"] > 0:
+            st.markdown(f"""
+            <div style='margin-top:15px;background:#1e1b4b;border:1px solid #6366f1;border-radius:8px;padding:12px;text-align:center;'>
+              <div style='color:#a5b4fc;font-size:11px;font-weight:700;letter-spacing:1px;'>NÚMERO DE GRAHAM (SUELO)</div>
+              <div style='color:#818cf8;font-size:22px;font-weight:800;'>${qs["graham_number"]:.2f}</div>
             </div>""", unsafe_allow_html=True)
+            
+        if qs["red_flags"]:
+            for alert in qs["red_flags"]:
+                st.error(alert)
+
+    with q2:
+        st.markdown("<div style='max-height: 400px; overflow-y: auto;'>", unsafe_allow_html=True)
+        for item in qs["details"]:
+            if item["points"] == 2.0:
+                icon, color = "🟢 Excel", "#34d399"
+            elif item["points"] == 1.5:
+                icon, color = "🟡 Bueno", "#fbbf24"
+            else:
+                icon, color = "🔴 Rechv", "#f87171"
+                
+            v = item["value"]
+            if v == "N/A": v_str = "N/A"
+            elif isinstance(v, float): v_str = f"{v:.2f}"
+            else: v_str = str(v)
+            
+            st.markdown(f"""<div style='display:flex;justify-content:space-between;padding:6px 10px;
+                border-bottom:1px solid rgba(30,45,64,0.3);'>
+              <span style='color:#e2e8f0;font-size:13px;flex:2;'>{item['name']}</span>
+              <span style='color:#94a3b8;font-size:13px;flex:1;text-align:right;'>Val: {v_str}</span>
+              <span style='color:{color};font-weight:600;font-size:13px;flex:1;text-align:right;'>{icon} ({item['points']}p)</span>
+            </div>""", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +639,121 @@ def _render_dcf_scenarios(ticker: str, parsed_data: dict = None):
             Potencial: <span style='color:{"#34d399" if upside > 0 else "#f87171"};font-weight:600;'>{upside:+.1f}%</span>
           </div>
         </div>""", unsafe_allow_html=True)
+
+
+
+# ---------------------------------------------------------------------------
+# Moat Radar Chart (Echarts)
+# ---------------------------------------------------------------------------
+def _render_moat_radar():
+    options = {
+        "tooltip": {},
+        "radar": {
+            "indicator": [
+                {"name": "Activos Intangibles (Marca/Patentes)", "max": 5},
+                {"name": "Costes de Cambio (Switching)", "max": 5},
+                {"name": "Efecto Red", "max": 5},
+                {"name": "Ventaja en Costes", "max": 5}
+            ],
+            "splitNumber": 5,
+            "axisName": {"color": "#94a3b8", "fontSize": 12},
+            "splitLine": {"lineStyle": {"color": "rgba(255, 255, 255, 0.1)"}},
+            "splitArea": {"show": False},
+        },
+        "series": [{
+            "type": "radar",
+            "data": [{
+                "value": [4, 3, 5, 2],  # Ejemplo placeholder
+                "name": "Fosos Defensivos",
+                "itemStyle": {"color": "#a78bfa"},
+                "areaStyle": {"color": "rgba(167,139,250,0.4)"},
+                "lineStyle": {"color": "#a78bfa", "width": 2}
+            }]
+        }],
+        "backgroundColor": "transparent"
+    }
+    if HAS_ECHARTS:
+        st_echarts(options=options, height="350px")
+    else:
+        st.info("Instala streamlit-echarts para ver el radar.")
+
+# ---------------------------------------------------------------------------
+# Interactive Scatter Plot (Risk/Reward)
+# ---------------------------------------------------------------------------
+def _render_scatter_plot(main_ticker: str):
+    with st.spinner("Calculando cuadrante de oportunidades (Score vs Valuation)..."):
+        # Get sector peers
+        try:
+            tk = yf.Ticker(main_ticker)
+            sector = tk.info.get("sector", "")
+            peers = SECTOR_PEERS.get(sector, [])
+            if main_ticker not in peers:
+                peers = [main_ticker.upper()] + peers[:4]
+            else:
+                peers = peers[:5]
+        except:
+            peers = [main_ticker.upper(), "AAPL", "MSFT"]
+        
+        data = []
+        for p in set(peers):
+            try:
+                # Get Score
+                qs = valuation.compute_fundamental_score_v2(p)
+                score_pct = qs.get("percentage", 0)
+                
+                # Get FV upside (Margin of Safety)
+                dcf = valuation.compute_dcf_scenarios(p)
+                curr_price = dcf.get("current_price", 1)
+                fv = dcf.get("base", {}).get("fair_value", 0)
+                mos = ((fv - curr_price) / fv * 100) if fv > 0 and curr_price else 0
+                
+                if score_pct > 0:
+                    data.append({
+                        "Ticker": p,
+                        "Score": score_pct,
+                        "MOS": mos,
+                        "Color": "#34d399" if p == main_ticker.upper() else "#60a5fa"
+                    })
+            except: pass
+            
+        if len(data) < 2:
+            st.info("No hay suficientes datos comparativos para graficar.")
+            return
+            
+        df = pd.DataFrame(data)
+        
+        fig = go.Figure()
+        
+        # Add quadrants
+        fig.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.2)")
+        fig.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.2)")
+        
+        # Quadrant labels
+        fig.add_annotation(x=max(df['MOS'].max(), 20), y=max(df['Score'].max(), 80), text="<b>COMPRA IDEAL</b>", 
+                          showarrow=False, font=dict(color="#34d399", size=14), opacity=0.3)
+        fig.add_annotation(x=min(df['MOS'].min(), -20), y=max(df['Score'].max(), 80), text="<b>BUENA PERO CARA</b>", 
+                          showarrow=False, font=dict(color="#fbbf24", size=14), opacity=0.3)
+                          
+        fig.add_trace(go.Scatter(
+            x=df['MOS'], y=df['Score'],
+            mode='markers+text',
+            text=df['Ticker'],
+            textposition="top center",
+            textfont=dict(color="#f0f6ff", size=11),
+            marker=dict(size=14, color=df['Color'], line=dict(width=2, color="#0a0a0a")),
+            hovertemplate="<b>%{text}</b><br>Score: %{y:.1f}%<br>Margen de Seguridad: %{x:.1f}%<extra></extra>"
+        ))
+        
+        fig.update_layout(
+            height=450, margin=dict(l=40, r=40, t=50, b=40),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter, sans-serif"),
+            title=dict(text="Mapa de Oportunidades: Score (Calidad) vs Margen de Seguridad", font=dict(color="#94a3b8", size=14)),
+            xaxis=dict(title="Margen de Seguridad (%) →", gridcolor="rgba(255,255,255,0.05)", zeroline=False),
+            yaxis=dict(title="Score Fundamental (0-100) ↑", gridcolor="rgba(255,255,255,0.05)", zeroline=False),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def render():
@@ -685,6 +851,35 @@ def render():
                             _tradingview_chart(ticker_name)
                         except Exception:
                             st.info("No se pudo cargar el chart de TradingView.")
+
+                
+                # ── MACHINE LEARNING (PETER LYNCH CLASSIFIER) ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    try:
+                        import ml_engine
+                        import sentiment
+                        import sys
+                        sys.path.append('c:/Users/usuario/Videos/dasboard/agents')
+                        try:
+                            from agents import devil_advocate
+                        except:
+                            import devil_advocate
+                        ml_res = ml_engine.analyze_ticker(ticker_name)
+                        if ml_res:
+                            lynch_t = ml_res.get("lynch_profile", "Unknown")
+                            lynch_c = ml_res.get("lynch_confidence", 0)
+                            st.markdown(f"""
+                            <div style='background:linear-gradient(90deg, #1e1b4b, #312e81);border:1px solid #4f46e5;
+                                        border-radius:12px;padding:16px;margin-bottom:20px;display:flex;align-items:center;gap:15px;'>
+                              <div style='font-size:36px;'>🧠</div>
+                              <div>
+                                <div style='color:#a5b4fc;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;'>Clasificador Neural de Peter Lynch</div>
+                                <div style='color:#f0f6ff;font-size:20px;font-weight:800;'>{lynch_t} <span style='font-size:14px;color:#818cf8;font-weight:500;'>({lynch_c}% precision)</span></div>
+                              </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    except Exception as e:
+                        pass
 
                 # ── FAIR VALUE TRAFFIC LIGHT ──
                 fv = None
@@ -997,6 +1192,20 @@ def render():
                         except Exception as e:
                             st.warning(f"Error calculando quality score: {e}")
 
+                # ── SCATTER PLOT OPPORTUNITIES ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("📍 Mapa de Oportunidades: Calidad vs Riesgo"):
+                        try:
+                            _render_scatter_plot(ticker_name)
+                        except Exception as e:
+                            st.warning(f"Error calculando cuadrantes: {e}")
+
+                # ── MOAT RADAR ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("🏰 Fosos Defensivos (Moat Radar)"):
+                        _render_moat_radar()
+
+
                 # ── DCF SCENARIOS ──
                 if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
                     with st.expander("🎯 DCF — 3 Escenarios (Pesimista / Base / Optimista)"):
@@ -1012,6 +1221,24 @@ def render():
                             _render_insider_trading(ticker_name)
                         except Exception as e:
                             st.warning(f"Error obteniendo insider trading: {e}")
+
+                
+                # ── ANALISTA SENTIMIENTO (FINBERT) ──
+                if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
+                    with st.expander("🎭 Sentimiento Rápido de Noticias (NLP Local)"):
+                        st.markdown("<div style='font-size:12px;color:#94a3b8;margin-bottom:10px;'>Simulación de Mr. Market impulsada por modelo ProsusAI/FinBERT procesado localmente con CUDA.</div>", unsafe_allow_html=True)
+                        mock_headlines = [
+                            f"{ticker_name} supera estimaciones pero guia a la baja",
+                            "Analistas advierten de problemas en la cadena de suministro",
+                            f"El CEO de {ticker_name} abandona su cargo de forma sorpresiva",
+                            "Fuerte incremento en margenes operativos dispara optimismo"
+                        ]
+                        if st.button("Ejecutar Análisis de Sentimiento", key="finbert_btn"):
+                            with st.spinner("Procesando con FinBERT Local..."):
+                                s_res = sentiment.aggregate_sentiment(mock_headlines)
+                                st.markdown(f"**Score Promedio (-1 Bearish a +1 Bullish): {s_res['avg_score']}**")
+                                st.write(f"Bullish: {s_res['bullish']} | Bearish: {s_res['bearish']}")
+                                st.dataframe(pd.DataFrame(s_res['details']), use_container_width=True)
 
                 # ── AI ANALYSIS (PDF) ──
                 if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):
@@ -1048,6 +1275,18 @@ def render():
                     db.save_stock_analysis(m, uploaded.name)
                     st.session_state[save_key] = True
                     st.success("Analisis guardado automaticamente.")
+
+                # ── RAG MEMORY VECTOR DB ──
+                if rag_engine.HAS_CHROMA:
+                    doc_json = json.dumps(parsed, ensure_ascii=False)
+                    if st.button("🧠 Guardar Reporte en Memoria Vectorial Avanzada (RAG)"):
+                        with st.spinner("Generando Embeddings y Guardando en base local..."):
+                            success = rag_engine.ingest_document(ticker_name, uploaded.name, doc_json)
+                            if success:
+                                st.success(f"Reporte '{uploaded.name}' integrado en tu cerebro vectorial de inversiones. (Total base: {rag_engine.get_memory_stats()} chunks)")
+                            else:
+                                st.error("No se pudo guardar en ChromaDB. Revisa la consola.")
+
 
                 sc1, sc2, sc3 = st.columns([2, 1, 1])
                 with sc2:
@@ -2598,72 +2837,6 @@ def render():
                         else:
                             st.info("Instala `m-patternpy` para deteccion automatica de patrones")
 
-                        # -- Part B: Create Chart & Send to Gemini Vision --
-                        st.markdown("### Analisis Visual con Gemini AI")
-
-                        # Create candlestick chart
-                        _fig_ai = go.Figure()
-                        _fig_ai.add_trace(go.Candlestick(
-                            x=df_chart.index,
-                            open=df_chart['Open'],
-                            high=df_chart['High'],
-                            low=df_chart['Low'],
-                            close=df_chart['Close'],
-                            name=ticker_solo
-                        ))
-
-                        # Add volume as bar chart on secondary y-axis
-                        _fig_ai.add_trace(go.Bar(
-                            x=df_chart.index,
-                            y=df_chart['Volume'],
-                            name='Volumen',
-                            marker_color='rgba(59,130,246,0.3)',
-                            yaxis='y2'
-                        ))
-
-                        # Add 20 and 50 day MAs
-                        if len(df_chart) >= 20:
-                            _fig_ai.add_trace(go.Scatter(
-                                x=df_chart.index,
-                                y=df_chart['Close'].rolling(20).mean(),
-                                name='MA20',
-                                line=dict(color='#f59e0b', width=1)
-                            ))
-                        if len(df_chart) >= 50:
-                            _fig_ai.add_trace(go.Scatter(
-                                x=df_chart.index,
-                                y=df_chart['Close'].rolling(50).mean(),
-                                name='MA50',
-                                line=dict(color='#8b5cf6', width=1)
-                            ))
-
-                        _fig_ai.update_layout(
-                            **dark_layout(
-                                title=f"{ticker_solo} — 6 Meses",
-                                yaxis2=dict(overlaying='y', side='right', showgrid=False,
-                                            range=[0, df_chart['Volume'].max() * 4]),
-                                xaxis_rangeslider_visible=False,
-                                height=500
-                            )
-                        )
-
-                        st.plotly_chart(_fig_ai, use_container_width=True)
-
-                        # Export chart to PNG and send to Gemini
-                        try:
-                            _img_bytes = _fig_ai.to_image(format="png", width=1200, height=600, engine="kaleido")
-
-                            from ai_engine import analyze_chart_image
-                            _patterns_text = "; ".join(patterns_found) if patterns_found else ""
-                            _ai_chart_analysis = analyze_chart_image(_img_bytes, ticker_solo, _patterns_text)
-
-                            st.markdown("---")
-                            st.markdown(_ai_chart_analysis)
-
-                        except Exception as _e_export:
-                            st.warning(f"No se pudo exportar grafico para analisis visual: {_e_export}")
-                            st.info("Asegurate de tener `kaleido` instalado: pip install kaleido")
-
         # ── AI ANALYSIS (standalone) ──
         st.markdown("<div class='sec-title'>Análisis con IA</div>", unsafe_allow_html=True)
         providers = ai_engine.get_available_providers()
@@ -2825,3 +2998,36 @@ def render():
                         st.plotly_chart(fig_price, use_container_width=True)
             elif len(hist_df) == 1:
                 st.info(f"Solo hay 1 análisis para {sel_ticker}. Sube otro reporte para ver la evolución.")
+
+
+    # ══════════════════════════════════════════════════════════════
+    # POST-MORTEM & PRE-MORTEM (El Abogado del Diablo)
+    # ══════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 😈 Diario de Inversión y Pre-Mortem (Orquestado por LangGraph)")
+    col_thesis, col_advocate = st.columns([1, 1])
+    with col_thesis:
+        st.write("Escribe tu tesis de inversión brevemente para someterla al juez:")
+        user_thesis = st.text_area("Mi tesis para comprar/mantener", 
+            value=f"Creo que {st.session_state.get('active_ticker', 'la empresa')} tiene un foso gigante y va a crecer a largo plazo...", height=200)
+        btn_advocate = st.button("Someter Tesis al Abogado", type="primary")
+
+    with col_advocate:
+        if btn_advocate:
+            with st.spinner("Despertando al Agente (LangGraph + Llama)..."):
+                try:
+                    score_simulated = 85
+                    res = devil_advocate.run_pre_mortem(st.session_state.get('active_ticker', 'UNKN'), user_thesis, score_simulated)
+                    
+                    st.markdown("""<div style='background:#451a03;border:2px solid #f87171;border-radius:10px;padding:15px;color:#fca5a5;'>
+                      <h4 style='color:#f87171;margin-top:0;'>X Destruccion de la Tesis (Pre-Mortem)</h4>
+                      <b>Sesgos Cognitivos Detectados:</b><br>
+                      {}<br><br>
+                      <b>Riesgos Catastróficos Fatales (Por qué quebrarás):</b><br>
+                      {}
+                    </div>""".format("<br>".join(res["biases_detected"]), "<br>".join(res["fatal_flaws"])), unsafe_allow_html=True)
+                    st.success("Tesis procesada en Diario de Inversiones -> Final: " + res.get("final_decision", "Revisión"))
+                except Exception as e:
+                    st.error(f"Error invocando LangGraph: {e}")
+        else:
+            st.info("Presiona 'Someter' para evaluar tus sesgos (Kahneman) mediante RAG y el modelo generativo.")

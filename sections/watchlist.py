@@ -306,9 +306,10 @@ def render():
             st.info(f"No se pudo cargar el editor de notas: {e}")
 
     # ══════════════════════════════════════════════════════════════
-    # TAB 2: ANÁLISIS TÉCNICO (RSI + MACD + Candlestick)
+    # TAB 2: ANÁLISIS TÉCNICO (TradingView)
     # ══════════════════════════════════════════════════════════════
     with tab_chart:
+        import streamlit.components.v1 as components
         wl2 = db.get_watchlist()
         if wl2.empty:
             st.info("Agrega tickers a tu watchlist primero.")
@@ -353,46 +354,34 @@ def render():
 
                 ik4.markdown(kpi("Precio", f"${last_price:.2f}", sel, "blue"), unsafe_allow_html=True)
 
-                # ── Combined Chart: Candlestick + RSI + MACD ──
-                fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                                    vertical_spacing=0.03,
-                                    row_heights=[0.55, 0.2, 0.25],
-                                    subplot_titles=["", "RSI (14)", "MACD"])
-
-                fig.add_trace(go.Candlestick(
-                    x=hd.index, open=hd["Open"], high=hd["High"],
-                    low=hd["Low"], close=hd["Close"], name=sel,
-                    increasing=dict(line=dict(color="#34d399"), fillcolor="#34d399"),
-                    decreasing=dict(line=dict(color="#f87171"), fillcolor="#f87171"),
-                    showlegend=False), row=1, col=1)
-                fig.add_trace(go.Scatter(x=hd.index, y=hd["MA20"], name="MA20",
-                    line=dict(color="#fbbf24", width=1.2)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=hd.index, y=hd["MA50"], name="MA50",
-                    line=dict(color="#a78bfa", width=1.2)), row=1, col=1)
-
-                fig.add_trace(go.Scatter(x=hd.index, y=hd["RSI"], name="RSI",
-                    line=dict(color="#60a5fa", width=1.5), showlegend=False), row=2, col=1)
-                fig.add_hline(y=70, line_dash="dot", line_color="#f87171", line_width=0.8, row=2, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="#34d399", line_width=0.8, row=2, col=1)
-                fig.add_hrect(y0=30, y1=70, fillcolor="rgba(96,165,250,0.05)", line_width=0, row=2, col=1)
-
-                macd_colors = ["#34d399" if v >= 0 else "#f87171" for v in hd["MACD_Hist"].fillna(0)]
-                fig.add_trace(go.Bar(x=hd.index, y=hd["MACD_Hist"], name="Histograma",
-                    marker_color=macd_colors, showlegend=False), row=3, col=1)
-                fig.add_trace(go.Scatter(x=hd.index, y=hd["MACD"], name="MACD",
-                    line=dict(color="#60a5fa", width=1.2), showlegend=False), row=3, col=1)
-                fig.add_trace(go.Scatter(x=hd.index, y=hd["Signal"], name="Señal",
-                    line=dict(color="#fbbf24", width=1.2, dash="dot"), showlegend=False), row=3, col=1)
-
-                fig.update_layout(**DARK, height=650,
-                    xaxis_rangeslider_visible=False,
-                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a", font=dict(size=10)),
-                    title=dict(text=f"{sel} — Análisis Técnico ({per})", font=dict(color="#94a3b8", size=14)))
-                for annotation in fig['layout']['annotations']:
-                    annotation['font'] = dict(color="#64748b", size=11)
-                fig.update_yaxes(gridcolor="#1a1a1a")
-                fig.update_xaxes(gridcolor="#1a1a1a")
-                st.plotly_chart(fig, use_container_width=True)
+                # ── Combined Chart: TradingView Advanced Chart ──
+                html_tv = f"""
+                <div class="tradingview-widget-container" style="height:650px;width:100%;">
+                  <div id="tradingview_adv_{sel}" style="height:100%;width:100%;"></div>
+                  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                  <script type="text/javascript">
+                  new TradingView.widget({{
+                    "autosize": true,
+                    "symbol": "{sel}",
+                    "interval": "D",
+                    "timezone": "America/New_York",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "es",
+                    "toolbar_bg": "#0a0a0a",
+                    "enable_publishing": false,
+                    "hide_side_toolbar": false,
+                    "allow_symbol_change": false,
+                    "details": true,
+                    "studies": ["STD;MACD", "STD;RSI"],
+                    "container_id": "tradingview_adv_{sel}",
+                    "backgroundColor": "rgba(10,10,10,1)",
+                    "gridColor": "rgba(40,40,40,0.3)"
+                  }});
+                  </script>
+                </div>
+                """
+                components.html(html_tv, height=660)
 
         # ── ADVANCED INDICATORS (pandas-ta) ──
         if HAS_PANDAS_TA:

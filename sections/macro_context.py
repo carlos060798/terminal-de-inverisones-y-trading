@@ -550,11 +550,15 @@ def render():
             # ── AI MACRO INSIGHT ──
             providers = ai_engine.get_available_providers()
             if providers:
-                if st.button("🧠 Insight Macro con IA"):
-                    with st.spinner("Generando insight macro…"):
+                st.markdown("<div class='sec-title' style='margin-top:20px;'>🧠 Investigación AI Fundamental y Macro</div>", unsafe_allow_html=True)
+                user_query_macro = st.text_input("💭 Pregunta Macro / Fundamental (opcional):", placeholder="ej. ¿Cómo afecta la curva plana a los bancos esta semana?", key="macro_ai_query")
+                
+                if st.button("Procesar Investigación con IA"):
+                    with st.spinner("Generando análisis macroeconómico…"):
                         ai_result = ai_engine.generate_macro_insight(
                             vix=vix_current,
                             sp500_ytd=sp_ytd,
+                            user_query=user_query_macro
                         )
                         if ai_result:
                             st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);

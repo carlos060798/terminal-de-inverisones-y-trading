@@ -42,7 +42,7 @@ def _get_backend(provider_id):
 # ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
-def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500):
+def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500, tools=None):
     """Generate text using the TEXT_CHAIN fallback sequence.
 
     Returns
@@ -58,7 +58,8 @@ def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500):
         try:
             backend = _get_backend(pid)
             model = provider["model"]
-            result = backend.call(model, prompt, system, max_tokens)
+            # Pass tools to the backend call
+            result = backend.call(model, prompt, system, max_tokens, tools=tools)
             if result:
                 record(pid)
                 return (result, pid)
@@ -151,11 +152,12 @@ Evalúa:
 
 
 def analyze_trade(ticker, trade_type, entry, exit_price=None, pnl=None,
-                  strategy=None):
+                  strategy=None, user_query=None):
     """Generate a post-mortem analysis of a trade.
 
     Returns tuple[str | None, str].
     """
+    req_q = f"PREGUNTA DEL USUARIO A RESPONDER: {user_query}" if user_query else "Genera un análisis post-mortem breve:\n**Evaluación**: ¿Fue una buena entrada? ¿El timing fue correcto?\n**Lección**: ¿Qué se puede aprender de esta operación?\n**Perspectiva**: ¿Qué esperar de este ticker a corto plazo?"
     prompt = f"""Analiza esta operación de trading:
 
 Ticker: {ticker}
@@ -165,15 +167,12 @@ Entrada: ${entry:,.4f}
 {"P&L: $" + f"{pnl:+,.2f}" if pnl else ""}
 {"Estrategia: " + strategy if strategy else ""}
 
-Genera un análisis post-mortem breve:
-**Evaluación**: ¿Fue una buena entrada? ¿El timing fue correcto?
-**Lección**: ¿Qué se puede aprender de esta operación?
-**Perspectiva**: ¿Qué esperar de este ticker a corto plazo?"""
+{req_q}"""
 
-    return generate(prompt, SYSTEM_FINANCE, max_tokens=800)
+    return generate(prompt, SYSTEM_FINANCE, max_tokens=1500)
 
 
-def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None):
+def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None, user_query=None):
     """Generate a macro-economic insight.
 
     Returns tuple[str | None, str].
@@ -186,13 +185,11 @@ def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None):
     if sp500_ytd:
         data_parts.append(f"S&P 500 YTD: {sp500_ytd:+.1f}%")
 
+    req_q = f"ENFOQUE ADICIONAL DEL USUARIO: {user_query}" if user_query else "Genera un análisis macro breve (máximo 5 oraciones):\n- ¿En qué fase del ciclo económico estamos?\n- ¿Qué implica para un inversor retail?\n- ¿Sectores defensivos o cíclicos? ¿Renta fija o variable?\n- ¿Riesgo principal a vigilar?"
+    
     prompt = f"""Dado el contexto macro actual:
 {chr(10).join(data_parts)}
 
-Genera un análisis macro breve (máximo 5 oraciones):
-- ¿En qué fase del ciclo económico estamos?
-- ¿Qué implica para un inversor retail?
-- ¿Sectores defensivos o cíclicos? ¿Renta fija o variable?
-- ¿Riesgo principal a vigilar?"""
+{req_q}"""
 
-    return generate(prompt, SYSTEM_FINANCE, max_tokens=600)
+    return generate(prompt, SYSTEM_FINANCE, max_tokens=1500)

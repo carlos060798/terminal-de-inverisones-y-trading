@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services import vision_service, text_service, sentiment_service, table_service
 from balancer import dashboard_data, PROVIDERS, is_available
+from agents.tools import TOOLS_METADATA
+from agents.investment_graph import run_investment_task
 
 # ---------------------------------------------------------------------------
 # Re-export system prompts for backward compatibility
@@ -42,15 +44,16 @@ def _detect_mime(file_name):
 # ---------------------------------------------------------------------------
 # Backward-compatible public API
 # ---------------------------------------------------------------------------
-def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500):
-    """Generate text via the text provider chain.
+def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500, use_tools=True):
+    """Generate text via the text provider chain, with tools enabled by default.
 
     Returns
     -------
     str | None
         The generated text, or ``None`` if all providers failed.
     """
-    text, _pid = text_service.generate(prompt, system, max_tokens)
+    tools = TOOLS_METADATA if use_tools else None
+    text, _pid = text_service.generate(prompt, system, max_tokens, tools=tools)
     return text
 
 
@@ -91,23 +94,23 @@ def analyze_portfolio(positions):
 
 
 def analyze_trade(ticker, trade_type, entry, exit_price=None, pnl=None,
-                  strategy=None):
+                  strategy=None, user_query=None):
     """Post-mortem analysis of a trade.
 
     Returns str | None.
     """
     text, _pid = text_service.analyze_trade(
-        ticker, trade_type, entry, exit_price, pnl, strategy,
+        ticker, trade_type, entry, exit_price, pnl, strategy, user_query=user_query
     )
     return text
 
 
-def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None):
+def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None, user_query=None):
     """Generate a macro-economic insight.
 
     Returns str | None.
     """
-    text, _pid = text_service.generate_macro_insight(vix, yield_10y, sp500_ytd)
+    text, _pid = text_service.generate_macro_insight(vix, yield_10y, sp500_ytd, user_query=user_query)
     return text
 
 
@@ -199,7 +202,15 @@ def route(task="text", prompt="", system="", max_tokens=1500,
         finally:
             text_service.TEXT_CHAIN = original_chain
 
-    # Default: text
+    # Default: text with tools
     return text_service.generate(
-        prompt, system or SYSTEM_FINANCE, max_tokens,
+        prompt, system or SYSTEM_FINANCE, max_tokens, tools=TOOLS_METADATA
     )
+
+def run_agentic_analysis(ticker: str, query: str = ""):
+    """Run the autonomous LangGraph agent for a complex ticker analysis."""
+    try:
+        result = run_investment_task(ticker, query)
+        return result.get("final_thesis", "No se pudo generar la tesis.")
+    except Exception as e:
+        return f"Error en el agente autónomo: {e}"

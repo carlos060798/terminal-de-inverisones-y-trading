@@ -13,86 +13,11 @@ from plotly.subplots import make_subplots
 from ui_shared import DARK, dark_layout, fmt, kpi
 
 try:
-    from strategies import (run_bollinger, run_mean_reversion, run_macd_crossover,
-                            walk_forward, optimize_params)
+    from backtest_vectorized import VectorizedEngine
+    from strategies import walk_forward, optimize_params
     HAS_STRATEGIES = True
 except ImportError:
     HAS_STRATEGIES = False
-
-
-def _calc_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-
-def _run_sma_crossover(df, fast=20, slow=50):
-    """SMA crossover strategy: buy when fast > slow, sell when fast < slow."""
-    df = df.copy()
-    df["SMA_fast"] = df["Close"].rolling(fast).mean()
-    df["SMA_slow"] = df["Close"].rolling(slow).mean()
-    df["Signal"] = 0
-    df.loc[df["SMA_fast"] > df["SMA_slow"], "Signal"] = 1
-    df["Position"] = df["Signal"].diff()
-    df["Strategy_Return"] = df["Signal"].shift(1) * df["Close"].pct_change()
-    df["BuyHold_Return"] = df["Close"].pct_change()
-    df["Strategy_Equity"] = (1 + df["Strategy_Return"].fillna(0)).cumprod()
-    df["BuyHold_Equity"] = (1 + df["BuyHold_Return"].fillna(0)).cumprod()
-    return df
-
-
-def _run_rsi_strategy(df, period=14, oversold=30, overbought=70):
-    """RSI strategy: buy when RSI < oversold, sell when RSI > overbought."""
-    df = df.copy()
-    df["RSI"] = _calc_rsi(df["Close"], period)
-    df["Signal"] = 0
-    position = 0
-    signals = []
-    for i in range(len(df)):
-        rsi_val = df["RSI"].iloc[i]
-        if pd.notna(rsi_val):
-            if rsi_val < oversold and position == 0:
-                position = 1
-            elif rsi_val > overbought and position == 1:
-                position = 0
-        signals.append(position)
-    df["Signal"] = signals
-    df["Position"] = df["Signal"].diff()
-    df["Strategy_Return"] = df["Signal"].shift(1) * df["Close"].pct_change()
-    df["BuyHold_Return"] = df["Close"].pct_change()
-    df["Strategy_Equity"] = (1 + df["Strategy_Return"].fillna(0)).cumprod()
-    df["BuyHold_Equity"] = (1 + df["BuyHold_Return"].fillna(0)).cumprod()
-    return df
-
-
-def _compute_metrics(df):
-    """Compute strategy metrics."""
-    strat_ret = df["Strategy_Return"].dropna()
-    bh_ret = df["BuyHold_Return"].dropna()
-
-    total_return_strat = (df["Strategy_Equity"].iloc[-1] - 1) * 100
-    total_return_bh = (df["BuyHold_Equity"].iloc[-1] - 1) * 100
-
-    sharpe = (strat_ret.mean() / strat_ret.std() * np.sqrt(252)) if strat_ret.std() > 0 else 0
-
-    equity = df["Strategy_Equity"]
-    running_max = equity.cummax()
-    drawdown = (equity - running_max) / running_max
-    max_dd = drawdown.min() * 100
-
-    buy_signals = len(df[df["Position"] == 1])
-    sell_signals = len(df[df["Position"] == -1])
-
-    return {
-        "total_return_strat": total_return_strat,
-        "total_return_bh": total_return_bh,
-        "sharpe": sharpe,
-        "max_drawdown": max_dd,
-        "buy_signals": buy_signals,
-        "sell_signals": sell_signals,
-    }
 
 
 def render():
@@ -158,17 +83,18 @@ def render():
                     data.columns = data.columns.get_level_values(0)
 
                 if strategy == "SMA Crossover":
-                    df = _run_sma_crossover(data, fast=fast_period, slow=slow_period)
+                    res = VectorizedEngine.run_sma_crossover(data, fast=fast_period, slow=slow_period)
                 elif strategy == "RSI Oversold/Overbought":
-                    df = _run_rsi_strategy(data, period=rsi_period, oversold=oversold, overbought=overbought)
+                    res = VectorizedEngine.run_rsi_strategy(data, period=rsi_period, oversold=oversold, overbought=overbought)
                 elif strategy == "Bollinger Breakout":
-                    df = run_bollinger(data, window=bb_window, num_std=bb_std)
+                    res = VectorizedEngine.run_bollinger(data, window=bb_window, num_std=bb_std)
                 elif strategy == "Mean Reversion":
-                    df = run_mean_reversion(data, window=mr_window, threshold=mr_threshold)
+                    res = VectorizedEngine.run_mean_reversion(data, window=mr_window, threshold=mr_threshold)
                 elif strategy == "MACD Crossover":
-                    df = run_macd_crossover(data, fast=macd_fast, slow=macd_slow, signal=macd_signal)
+                    res = VectorizedEngine.run_macd_crossover(data, fast=macd_fast, slow=macd_slow, signal=macd_signal)
 
-            metrics = _compute_metrics(df)
+            metrics = VectorizedEngine.extract_metrics(res, data)
+            df = VectorizedEngine.generate_ui_dataframe(res, data)
 
             # KPIs
             mk1, mk2, mk3, mk4 = st.columns(4)
@@ -178,6 +104,13 @@ def render():
             mk2.markdown(kpi("Retorno Buy & Hold", f"{metrics['total_return_bh']:+.1f}%", "", bh_color), unsafe_allow_html=True)
             mk3.markdown(kpi("Sharpe Ratio", f"{metrics['sharpe']:.2f}", "", "blue"), unsafe_allow_html=True)
             mk4.markdown(kpi("Max Drawdown", f"{metrics['max_drawdown']:.1f}%", "", "red"), unsafe_allow_html=True)
+
+            # Additional KPIs
+            st.markdown("<br>", unsafe_allow_html=True)
+            nk1, nk2, nk3 = st.columns(3)
+            nk1.markdown(kpi("Sortino Ratio", f"{metrics.get('sortino', 0):.2f}", "", "blue"), unsafe_allow_html=True)
+            nk2.markdown(kpi("Calmar Ratio", f"{metrics.get('calmar', 0):.2f}", "", "blue"), unsafe_allow_html=True)
+            nk3.markdown(kpi("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}", "", "green" if metrics.get('profit_factor', 0) > 1 else "red"), unsafe_allow_html=True)
 
             # Alpha
             alpha = metrics["total_return_strat"] - metrics["total_return_bh"]

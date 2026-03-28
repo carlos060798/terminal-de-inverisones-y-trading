@@ -53,3 +53,19 @@ openbb
 psutil
 pytest
 requests-mock
+
+# Sprint 1-3 Dependencies
+diskcache>=5.6.0
+edgartools>=2.15.0
+langgraph>=0.0.1
+vectorbt>=0.25.0
+pandas-ta>=0.3.14
+
+# Sprint 4 UI Dependencies
+streamlit-aggrid
+streamlit-echarts
+streamlit-lightweight-charts
+chromadb>=0.4.0
+sentence-transformers>=2.0.0
+transformers>=4.30.0
+torch>=2.0.0

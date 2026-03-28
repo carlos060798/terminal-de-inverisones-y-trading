@@ -19,7 +19,6 @@ def _get_secret(name: str) -> str:
     return __import__('os').environ.get(name, "")
 
 
-@st.cache_resource
 def _get_client():
     """Return a HuggingFace InferenceClient or None."""
     if not HAS_HF:
@@ -32,10 +31,17 @@ def _get_client():
     except Exception:
         return None
 
+# Manual wrapper for Streamlit cache
+try:
+    if st.runtime.exists():
+        _get_client = st.cache_resource(_get_client)
+except (ImportError, AttributeError):
+    pass
+
 
 def call(model: str, prompt: str, system: str = "", max_tokens: int = 4096,
-         image_bytes: bytes = None, mime: str = None) -> str:
-    """Generate content using HuggingFace Inference API."""
+         image_bytes: bytes = None, mime: str = None, tools: list = None) -> str:
+    """Generate content using HuggingFace Inference API. Tools not natively supported here yet."""
     client = _get_client()
     if client is None:
         return ""
@@ -63,8 +69,8 @@ def call(model: str, prompt: str, system: str = "", max_tokens: int = 4096,
             max_tokens=max_tokens,
         )
         return response.choices[0].message.content.strip()
-    except Exception:
-        return ""
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def sentiment(headlines: list) -> list[dict]:

@@ -19,7 +19,6 @@ def _get_secret(name: str) -> str:
     return __import__('os').environ.get(name, "")
 
 
-@st.cache_resource
 def _get_client():
     """Return a Groq client or None."""
     if not HAS_GROQ:
@@ -32,10 +31,17 @@ def _get_client():
     except Exception:
         return None
 
+# Manual wrapper to handle @st.cache_resource only if in Streamlit
+try:
+    if st.runtime.exists():
+        _get_client = st.cache_resource(_get_client)
+except (ImportError, AttributeError):
+    pass
+
 
 def call(model: str, prompt: str, system: str = "", max_tokens: int = 4096,
-         image_bytes: bytes = None, mime: str = None) -> str:
-    """Generate content using Groq chat completions."""
+         image_bytes: bytes = None, mime: str = None, tools: list = None) -> str:
+    """Generate content using Groq chat completions, with optional tool calling."""
     client = _get_client()
     if client is None:
         return ""
@@ -57,12 +63,51 @@ def call(model: str, prompt: str, system: str = "", max_tokens: int = 4096,
         else:
             messages.append({"role": "user", "content": prompt})
 
+        # Tools configuration
+        groq_tools = None
+        if tools:
+            from agents.tools import TOOLS_METADATA, TOOLS_MAP
+            groq_tools = [{"type": "function", "function": t} for t in TOOLS_METADATA]
+
+        kwargs = {}
+        if groq_tools:
+            kwargs["tools"] = groq_tools
+            kwargs["tool_choice"] = "auto"
+            
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=0.3,
+            **kwargs
         )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return ""
+        
+        message = response.choices[0].message
+        
+        # Tool execution loop (one level)
+        if hasattr(message, 'tool_calls') and message.tool_calls:
+            messages.append(message)
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                import json
+                args = json.loads(tool_call.function.arguments)
+                
+                tool_func = TOOLS_MAP.get(func_name)
+                if tool_func:
+                    result = tool_func(**args)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": func_name,
+                        "content": json.dumps(result),
+                    })
+            
+            second_response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+            )
+            return second_response.choices[0].message.content.strip()
+
+        return message.content.strip() if message.content else ""
+    except Exception as e:
+        return f"Error: {e}"

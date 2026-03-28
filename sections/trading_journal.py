@@ -274,9 +274,12 @@ def render():
         # ── AI TRADE ANALYSIS ──
         providers = ai_engine.get_available_providers()
         if providers and not closed.empty:
-            with st.expander("🧠 Análisis IA de Trading"):
+            with st.expander("🧠 Análisis IA de Trading y Fundamentales"):
                 last_trade = closed.iloc[-1]
                 st.markdown(f"**Última operación cerrada:** {last_trade['ticker']} — P&L: ${last_trade['pnl']:+,.2f}")
+                
+                user_trade_query = st.text_area("💭 Investigación Fundamental/Técnica sobre esta operación (opcional):", placeholder="ej. ¿Cuáles eran los fundamentales de esta acción durante esa semana? ¿Pudo haber afectado a mi salida temprana?", height=70)
+                
                 if st.button("Analizar última operación con IA"):
                     with st.spinner("Analizando…"):
                         ai_result = ai_engine.analyze_trade(
@@ -286,6 +289,7 @@ def render():
                             exit_price=last_trade.get("exit_price"),
                             pnl=last_trade.get("pnl"),
                             strategy=last_trade.get("strategy", ""),
+                            user_query=user_trade_query
                         )
                         if ai_result:
                             st.markdown(f"""<div style='background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);

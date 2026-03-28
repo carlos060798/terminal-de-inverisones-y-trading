@@ -163,15 +163,27 @@ def walk_forward(df, strategy_fn, params, n_splits=5):
         try:
             # Run strategy on train
             train_result = strategy_fn(train_df, **params)
-            train_ret = (train_result["Strategy_Equity"].iloc[-1] - 1) * 100
-            train_strat = train_result["Strategy_Return"].dropna()
-            train_sharpe = (train_strat.mean() / train_strat.std() * np.sqrt(252)) if train_strat.std() > 0 else 0
+            
+            if isinstance(train_result, dict) and "pf" in train_result:
+                train_stats = train_result["pf"].stats()
+                train_ret = train_stats.get('Total Return [%]', 0.0)
+                train_sharpe = train_stats.get('Sharpe Ratio', 0.0)
+            else:
+                train_ret = (train_result["Strategy_Equity"].iloc[-1] - 1) * 100
+                train_strat = train_result["Strategy_Return"].dropna()
+                train_sharpe = (train_strat.mean() / train_strat.std() * np.sqrt(252)) if train_strat.std() > 0 else 0
 
             # Run strategy on test
             test_result = strategy_fn(test_df, **params)
-            test_ret = (test_result["Strategy_Equity"].iloc[-1] - 1) * 100
-            test_strat = test_result["Strategy_Return"].dropna()
-            test_sharpe = (test_strat.mean() / test_strat.std() * np.sqrt(252)) if test_strat.std() > 0 else 0
+            
+            if isinstance(test_result, dict) and "pf" in test_result:
+                test_stats = test_result["pf"].stats()
+                test_ret = test_stats.get('Total Return [%]', 0.0)
+                test_sharpe = test_stats.get('Sharpe Ratio', 0.0)
+            else:
+                test_ret = (test_result["Strategy_Equity"].iloc[-1] - 1) * 100
+                test_strat = test_result["Strategy_Return"].dropna()
+                test_sharpe = (test_strat.mean() / test_strat.std() * np.sqrt(252)) if test_strat.std() > 0 else 0
 
             folds.append({
                 "fold": i + 1,
@@ -222,9 +234,16 @@ def optimize_params(df, strategy_fn, param_grid):
         params = dict(zip(keys, combo))
         try:
             result_df = strategy_fn(df, **params)
-            total_ret = (result_df["Strategy_Equity"].iloc[-1] - 1) * 100
-            strat_ret = result_df["Strategy_Return"].dropna()
-            sharpe = (strat_ret.mean() / strat_ret.std() * np.sqrt(252)) if strat_ret.std() > 0 else 0
+            
+            if isinstance(result_df, dict) and "pf" in result_df:
+                stats = result_df["pf"].stats()
+                total_ret = stats.get('Total Return [%]', 0.0)
+                sharpe = stats.get('Sharpe Ratio', 0.0)
+            else:
+                total_ret = (result_df["Strategy_Equity"].iloc[-1] - 1) * 100
+                strat_ret = result_df["Strategy_Return"].dropna()
+                sharpe = (strat_ret.mean() / strat_ret.std() * np.sqrt(252)) if strat_ret.std() > 0 else 0
+                
             row = {k: v for k, v in params.items()}
             row["Return(%)"] = round(total_ret, 2)
             row["Sharpe"] = round(float(sharpe), 2)
