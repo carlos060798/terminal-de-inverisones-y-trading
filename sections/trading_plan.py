@@ -1,341 +1,364 @@
 """
-sections/trading_plan.py - Trading Plan Institucional
-7 secciones + Notas Semanales + Intérprete de Señales Wyckoff.
+sections/trading_plan.py - Plan de Trading Integral (v7.5)
+Implementación TOTAL: 14 Pestañas, Metodología DSD, Motor Wyckoff v7.
 """
 import streamlit as st
 import pandas as pd
-from ui_shared import kpi, dark_layout, CHART_SM
+from datetime import datetime
+from ui_shared import kpi
 
-# ── Datos estáticos del plan ──────────────────────────────────────────────────
-RUTINA_HORARIOS = [
-    {"Bloque": "DOMINGO", "Día/Hora": "Domingo 6:00 – 6:45 PM", "Actividad": "Macro & Contexto", "Detalle": "DXY sesgo macro 1W, Correlaciones, Fases Wyckoff", "Duración": "45 min"},
-    {"Bloque": "DOMINGO", "Día/Hora": "Domingo 6:45 – 7:30 PM", "Actividad": "Análisis Top-Down", "Detalle": "1W → 1D → 4H, OB, FVG, POI entrada, SL", "Duración": "45 min"},
-    {"Bloque": "DOMINGO", "Día/Hora": "Domingo 7:30 – 8:00 PM", "Actividad": "Planteamiento & Alertas", "Detalle": "Narrativa setup, Alertas en 4H, R:R ≥ 1:3", "Duración": "30 min"},
-    {"Bloque": "MAÑANA", "Día/Hora": "Lun-Vie 7:00 – 7:30 AM", "Actividad": "Revisión matutina", "Detalle": "Alertas noche, Cierre Asia, Gap índices", "Duración": "30 min"},
-    {"Bloque": "NY OPEN", "Día/Hora": "Lun-Vie 12:00 – 2:00 PM", "Actividad": "Ventana operativa principal", "Detalle": "CHoCH en 1H, Ejecutar entradas, Gestionar SL/TP", "Duración": "2 horas"},
-    {"Bloque": "NOCHE", "Día/Hora": "Lun-Vie 6:30 – 7:00 PM", "Actividad": "Preparación Tokyo", "Detalle": "Gestionar posiciones, Alertas sesión asiática", "Duración": "30 min"},
+# ── 1. CONFIGURACIÓN Y CONSTANTES DSD ─────────────────────────────────────────
+
+PERFIL_TRADER = [
+    {"Elemento": "Horario Disponible", "Valor": "6:00 am - 12:00 pm (Hora Colombia)"},
+    {"Elemento": "Sesiones Cubiertas", "Valor": "Cierre Europa + Apertura Nueva York"},
+    {"Elemento": "Timeframes", "Valor": "Semanal (contexto), Diario (estructura), 4H/1H (gatillo)"},
+    {"Elemento": "Metodología", "Valor": "Wyckoff 2.0 + Smart Money + Price Action"},
+    {"Elemento": "Operaciones/Semana", "Valor": "Máximo 3-5 setups de alta probabilidad"},
+    {"Elemento": "Capital en Riesgo", "Valor": "Máximo 2% por operación"},
+    {"Elemento": "Filosofía", "Valor": "'No operar contra tendencia' (Lynch) / 'Pérdida limitada' (Darvas)"},
 ]
 
-ACTIVOS = [
-    # Forex (6)
-    {"Activo": "EUR/USD", "Tipo": "Forex",  "Sesgo": "Short",   "POI": "1.0850", "SL": "1.0870", "TP": "1.0750", "Sesion": "London/NY"},
-    {"Activo": "USD/JPY", "Tipo": "Forex",  "Sesgo": "Long",    "POI": "149.50", "SL": "148.80", "TP": "151.00", "Sesion": "Tokyo"},
-    {"Activo": "GBP/USD", "Tipo": "Forex",  "Sesgo": "Neutral", "POI": "1.2620", "SL": "1.2580", "TP": "1.2720", "Sesion": "London"},
-    {"Activo": "AUD/USD", "Tipo": "Forex",  "Sesgo": "Short",   "POI": "0.6450", "SL": "0.6480", "TP": "0.6380", "Sesion": "Tokyo"},
-    {"Activo": "USD/CAD", "Tipo": "Forex",  "Sesgo": "Long",    "POI": "1.3520", "SL": "1.3480", "TP": "1.3620", "Sesion": "NY"},
-    {"Activo": "NZD/USD", "Tipo": "Forex",  "Sesgo": "Neutral", "POI": "0.5980", "SL": "0.5950", "TP": "0.6050", "Sesion": "Tokyo"},
-    # Indices (3)
-    {"Activo": "US30",    "Tipo": "Indice", "Sesgo": "Neutral", "POI": "39500",  "SL": "39200",  "TP": "40200",  "Sesion": "NY"},
-    {"Activo": "SPX500",  "Tipo": "Indice", "Sesgo": "Long",    "POI": "5100",   "SL": "5080",   "TP": "5200",   "Sesion": "NY"},
-    {"Activo": "NAS100",  "Tipo": "Indice", "Sesgo": "Long",    "POI": "18200",  "SL": "18000",  "TP": "18600",  "Sesion": "NY"},
-    # Metales (2)
-    {"Activo": "XAU/USD", "Tipo": "Metal",  "Sesgo": "Long",    "POI": "2125",   "SL": "2115",   "TP": "2160",   "Sesion": "London"},
-    {"Activo": "XAG/USD", "Tipo": "Metal",  "Sesgo": "Long",    "POI": "24.80",  "SL": "24.20",  "TP": "26.00",  "Sesion": "London"},
-    # Crypto (2)
-    {"Activo": "BTC/USD", "Tipo": "Crypto", "Sesgo": "Long",    "POI": "62000",  "SL": "60000",  "TP": "68000",  "Sesion": "24/7"},
-    {"Activo": "ETH/USD", "Tipo": "Crypto", "Sesgo": "Long",    "POI": "3100",   "SL": "2980",   "TP": "3400",   "Sesion": "24/7"},
-    # Accion (1)
-    {"Activo": "NVDA",    "Tipo": "Accion", "Sesgo": "Long",    "POI": "820",    "SL": "790",    "TP": "900",    "Sesion": "NY"},
+ACTIVOS_PRIORIZADOS = [
+    {"Categoría": "Índices EEUU", "Activo": "S&P 500", "Símbolo": "ES / SPX500", "Prioridad": "⭐⭐⭐", "Volatilidad": "Alta", "Horario": "8:30-10:30 am"},
+    {"Categoría": "Índices EEUU", "Activo": "Nasdaq 100", "Símbolo": "NQ / NAS100", "Prioridad": "⭐⭐⭐", "Volatilidad": "Muy Alta", "Horario": "8:30-10:30 am"},
+    {"Categoría": "Índices EEUU", "Activo": "Dow Jones", "Símbolo": "YM / US30", "Prioridad": "⭐⭐", "Volatilidad": "Media", "Horario": "8:30-10:30 am"},
+    {"Categoría": "Forex", "Activo": "EUR/USD", "Símbolo": "EURUSD", "Prioridad": "⭐⭐⭐", "Volatilidad": "Alta", "Horario": "6:00-10:00 am"},
+    {"Categoría": "Forex", "Activo": "GBP/USD", "Símbolo": "GBPUSD", "Prioridad": "⭐⭐", "Volatilidad": "Media-Alta", "Horario": "6:00-9:00 am"},
+    {"Categoría": "Forex", "Activo": "AUD/USD", "Símbolo": "AUDUSD", "Prioridad": "⭐", "Volatilidad": "Media", "Horario": "6:00-8:00 am"},
+    {"Categoría": "Forex", "Activo": "USD/JPY", "Símbolo": "USDJPY", "Prioridad": "⭐⭐", "Volatilidad": "Media", "Horario": "8:30-11:00 am"},
+    {"Categoría": "Commodities", "Activo": "Oro", "Símbolo": "XAUUSD", "Prioridad": "⭐⭐", "Volatilidad": "Alta", "Horario": "8:30-10:30 am"},
+    {"Categoría": "Commodities", "Activo": "Petróleo WTI", "Símbolo": "USOIL", "Prioridad": "⭐⭐", "Volatilidad": "Alta", "Horario": "8:30-10:30 am"},
+    {"Categoría": "Cripto", "Activo": "Bitcoin", "Símbolo": "BTCUSD", "Prioridad": "⭐⭐", "Volatilidad": "Muy Alta", "Horario": "9:00-11:00 am"},
+    {"Categoría": "Cripto", "Activo": "Ethereum", "Símbolo": "ETHUSD", "Prioridad": "⭐", "Volatilidad": "Muy Alta", "Horario": "9:00-11:00 am"},
+    {"Categoría": "Referencia", "Activo": "DXY", "Símbolo": "DXY", "Prioridad": "⭐⭐⭐", "Volatilidad": "Media", "Horario": "6:00-11:00 am"},
+    {"Categoría": "Referencia", "Activo": "VIX", "Símbolo": "VIX", "Prioridad": "⭐⭐⭐", "Volatilidad": "Variable", "Horario": "6:00-11:00 am"},
 ]
 
-
-CHECKLIST_MORNING = [
-    "Revisar si alguna alerta se activó durante la noche/Asia",
-    "Verificar impacto de fundamentales (Investing / FF)",
-    "Revisar DXY y contexto general", "Chequear precio cerca de POI validado"]
-CHECKLIST_LUNCH = [
-    "Identificar setups activos o entrando a POI",
-    "Confirmar CHoCH / BOS en 1H antes de entrar",
-    "Calcular tamaño de posición y R:R",
-    "Gestionar posiciones activas (TP1, Break Even)"]
-CHECKLIST_EVENING = [
-    "Actualizar journal con operaciones del día",
-    "Verificar posiciones sin SL/TP activo",
-    "Fijar alertas para sesión Tokyo",
-    "Cerrar gráficas — descanso mental"]
-
-ALERTAS = [
-    {"Activo": "EUR/USD", "Tipo": "Entrada",      "Nivel": "1.0850", "Protocolo": "Short en 15m si llega"},
-    {"Activo": "XAU/USD", "Tipo": "Invalidación", "Nivel": "2115",   "Protocolo": "Cerrar idea larga"},
-    {"Activo": "SPX500",  "Tipo": "Entrada",       "Nivel": "5100",   "Protocolo": "CHoCH alcista NY Open"},
+CORRELACIONES = [
+    {"Activo": "DXY", "Positiva": "USDJPY (+0.85)", "Negativa": "EURUSD (-0.92)", "Fuerza": "Muy Alta"},
+    {"Activo": "DXY", "Positiva": "—", "Negativa": "GBPUSD (-0.88)", "Fuerza": "Muy Alta"},
+    {"Activo": "DXY", "Positiva": "—", "Negativa": "AUDUSD (-0.85)", "Fuerza": "Muy Alta"},
+    {"Activo": "DXY", "Positiva": "—", "Negativa": "XAUUSD (-0.75)", "Fuerza": "Alta"},
+    {"Activo": "VIX", "Positiva": "—", "Negativa": "SPX500 (-0.80)", "Fuerza": "Alta"},
+    {"Activo": "VIX", "Positiva": "—", "Negativa": "NAS100 (-0.78)", "Fuerza": "Alta"},
+    {"Activo": "US10Y", "Positiva": "DXY (+0.65)", "Negativa": "SPX500 (-0.70)", "Fuerza": "Media-Alta"},
+    {"Activo": "US10Y", "Positiva": "—", "Negativa": "NAS100 (-0.75)", "Fuerza": "Alta"},
+    {"Activo": "BTC", "Positiva": "ETH (+0.90), NAS100 (+0.65)", "Negativa": "DXY (-0.60)", "Fuerza": "Media"},
+    {"Activo": "WTI", "Positiva": "CAD/JPY (+0.75)", "Negativa": "USD/CAD (-0.70)", "Fuerza": "Media-Alta"},
 ]
 
-JOURNAL_COLUMNS = ["Fecha", "Activo", "Tipo", "Entrada", "Salida", "Pips/Pts", "Resultado", "Notas"]
+RUTINA_DIARIA = [
+    {"Hora": "6:00-6:15 am", "Actividad": "Checklist Macro Rápido", "Activos": "DXY, VIX, US10Y", "Duración": "15 min"},
+    {"Hora": "6:15-7:30 am", "Actividad": "Análisis Forex (Europa)", "Activos": "EURUSD, GBPUSD", "Duración": "75 min"},
+    {"Hora": "7:30-8:30 am", "Actividad": "Transición NY + Preparación", "Activos": "Todos", "Duración": "60 min"},
+    {"Hora": "8:30-9:30 am", "Actividad": "GOLDEN HOUR Opening NY", "Activos": "ES, NQ, SPX500", "Duración": "60 min"},
+    {"Hora": "9:30-10:30 am", "Actividad": "Confirmación + Ejecución", "Activos": "Todos", "Duración": "60 min"},
+    {"Hora": "10:30-11:30 am", "Actividad": "Gestión Posiciones + Cripto", "Activos": "XAU, BTC, ETH", "Duración": "60 min"},
+    {"Hora": "11:30-12:00 pm", "Actividad": "Cierre + Journal", "Activos": "Todos", "Duración": "30 min"},
+]
 
-# ── Wyckoff: System prompt del intérprete ────────────────────────────────────
-_WYCKOFF_SYSTEM = """Eres el intérprete oficial del indicador Wyckoff Structure Detector v6 (Pine Script).
-El usuario te da las lecturas actuales del indicador. Responde SIEMPRE en español con Markdown técnico y estas secciones obligatorias:
-1. **CONTEXTO ESTRUCTURAL**: Explica lo que significa esa combinación Estructura + Fase
-2. **MOMENTO DEL CICLO**: En qué punto exacto del ciclo Wyckoff está el precio ahora
-3. **SEÑALES CONFIRMADAS**: Qué eventos (PS/SC/AR/ST/Spring/SOS/BU) ya ocurrieron y cuáles faltan
-4. **ZONA OPERATIVA**: ¿Hay zona de entrada válida? (Agresiva=Fase C, Principal=Fase D). Si no, indica claramente "SIN ZONA VÁLIDA"
-5. **PLAN DE TRADING**: Entrada sugerida, Stop Loss estructural, TP1 (próxima liquidez), TP2 (OB opuesto), R:R estimado
-6. **ESCENARIO ALTERNATIVO**: Qué pasaría si el precio invalida la tesis
-7. **NIVEL DE INVALIDACIÓN**: Precio exacto donde la tesis queda nula
+CHECKLIST_DSD_23 = [
+    "DXY: ¿Dirección alineada con el setup?",
+    "VIX: ¿Nivel <15 (calma) o >20 (miedo)?",
+    "Calendario: ¿Sin noticias ⭐⭐⭐ (CPI/FOMC) próximamente?",
+    "Estructura 1W: ¿Fase Wyckoff alineada?",
+    "Estructura 1D: ¿Confirmada dirección semanal?",
+    "Fase 1H: ¿Estamos en Fase C o D?",
+    "Evento: ¿Detectado Spring, UTAD o Test VPOC?",
+    "Volumen: ¿Absorción o clímax detectado en el giro?",
+    "SOT: ¿Hay agotamiento de empujes (Shortening of Thrust)?",
+    "Weis Wave: ¿Confirmado volumen institucional?",
+    "VWAP: ¿Precio en zona de valor o rechazando?",
+    "Entrada: ¿Nivel exacto (POI) definido?",
+    "Stop Loss: ¿Bajo el Spring o nivel invalidante?",
+    "TP1/TP2: ¿Ratio R:R mínimo 1:2.5?",
+    "Riesgo: ¿Máximo 2% del capital en esta operación?",
+    "Riesgo Diario: ¿Menos del 4% acumulado hoy?",
+    "Riesgo Semanal: ¿Menos del 8% acumulado esta semana?",
+    "Límite Trades: ¿Es mi 1er o 2do trade del día?",
+    "Psicología: ¿Operando por análisis, no por emoción?",
+    "Descanso: ¿Dormí >6h y estoy enfocado?",
+    "Revancha: ¿No estoy intentando recuperar pérdidas?",
+    "Mentalidad: 'Entro, Defiendo, Salgo' activada",
+    "Confirmación Final: ¿Todos los anteriores marcados?"
+]
 
-Sé conciso, específico y accionable. Evita repetir las lecturas del usuario."""
+CHECKLIST_POST_17 = [
+    "Monitorea posición cada 15 min",
+    "Verifica que SL esté activo en broker",
+    "No mover SL en contra bajo ninguna circunstancia",
+    "Revisar correlaciones cada hora (DXY/VIX)",
+    "Si alcanza TP1 → cerrar 50% + mover SL a BE",
+    "Anotar estado emocional actual",
+    "Verificar que VIX no esté disparándose (>2 unidades)",
+    "Revisar noticias macro imprevistas",
+    "Si sucede algo inesperado → evaluar cierre manual",
+    "No agregar a posición perdedora (NUNCA)",
+    "Solo agregar si el plan técnico lo contempla",
+    "Revisar horario (¿falta < 1h para las 12pm?)",
+    "Si hay 2 pérdidas hoy → PARAR inmediatamente",
+    "Actualizar riesgo diario consumido",
+    "Verificar que HTF (1D/4H) siga alineado",
+    "Anotar lecciones de gestión parcial",
+    "Preparar trail stop (1.5x ATR) si está en beneficio"
+]
 
+CHECKLIST_CIERRE_16 = [
+    "Cerrar TODAS las posiciones abiertas (Regla 12pm)",
+    "Cancelar todas las órdenes pendientes",
+    "Verificar que no hay exposición residual",
+    "Registrar CADA trade en el Journal",
+    "Anotar P&L del día ($ y %)",
+    "Calcular riesgo diario final",
+    "Verificar riesgo semanal acumulado",
+    "¿Se respetó el plan dominical? (Sí/No)",
+    "¿Se siguió el checklist pre-entrada? (Sí/No)",
+    "Anotar estado emocional al cerrar sesión",
+    "Identificar mejor trade (¿respetó Wyckoff?)",
+    "Identificar peor trade (¿error emocional?)",
+    "Lección principal para mañana",
+    "Identificar activos para vigilar mañana",
+    "Desconectar terminal y plataforma de trading",
+    "Descanso mental (mínimo 30 min sin pantallas)"
+]
 
-def _render_wyckoff_interpreter():
-    """Sub-sección: Intérprete de señales del indicador Wyckoff."""
-    st.markdown("### 🎯 Intérprete de Señales — Wyckoff Structure Detector v6")
-    st.caption("Ingresa las lecturas actuales de tu indicador en TradingView y la IA genera el análisis completo.")
+GLOSARIO_COMPLETO = {
+    "Acumulación": "Fase donde Smart Money compra silenciosamente antes de tendencia alcista.",
+    "Distribución": "Fase donde Smart Money vende silenciosamente antes de tendencia bajista.",
+    "Spring": "Ruptura falsa hacia abajo que atrapa vendedores antes de giro alcista.",
+    "Upthrust / UTAD": "Ruptura falsa hacia arriba que atrapa compradores antes de giro bajista.",
+    "VPOC": "Point of Control — Precio con mayor volumen en el perfil.",
+    "VAL / VAH": "Value Area Low/High — Límites del área de valor (70% volumen).",
+    "HVN": "High Volume Node — Zona de alta aceptación de precio.",
+    "LVN": "Low Volume Node — Zona de rechazo esperado de precio.",
+    "Creek": "Resistencia clave en estructura de acumulación.",
+    "ICE": "Soporte clave en estructura de distribución.",
+    "ATR": "Average True Range — Medidor de volatilidad.",
+    "BU": "BackUp — Retroceso tras una señal de fuerza (SOS).",
+    "CHoCH": "Change of Character — Primer indicio de cambio de tendencia.",
+    "Delta": "Volumen comprador menos volumen vendedor.",
+    "FTI": "Fall Through Ice — Caída a través del soporte de distribución.",
+    "JAC": "Jump Across Creek — Salto sobre la resistencia de acumulación.",
+    "LPS / LPSY": "Último Punto de Soporte / Último Punto de Oferta.",
+    "SC / BC": "Selling Climax / Buying Climax.",
+    "SOS / SOW": "Sign of Strength / Sign of Weakness.",
+    "SOT": "Shortening of Thrust — Agotamiento de la tendencia.",
+    "ST": "Secondary Test — Test secundario de la parada.",
+    "TST": "Test del Spring o Upthrust.",
+    "HTF / MTF": "Higher Timeframe / Multi-Timeframe.",
+    "R:R": "Relación Riesgo : Beneficio.",
+    "VP": "Volume Profile (Perfil de Volumen).",
+    "NFP / CPI / FOMC": "Eventos macroeconómicos clave (Nóminas, Inflación, Tasas)."
+}
 
-    with st.form("wyckoff_interp_form"):
+_WYCKOFF_SYSTEM_V7 = """Eres el Intérprete Oficial del Wyckoff Structure Detector v7.
+Analiza estrictamente los datos técnicos y genera una tabla markdown de 17 FILAS exacta.
+
+FILAS OBLIGATORIAS:
+1. Estructura: ▲ Acumulación / ▼ Distribución / Re-acumulación / Re-distribución
+2. Esquema: #1 (con sacudida) / #2 (sin sacudida)
+3. Fase: A, B, C, D o E
+4. Último Evento: Spring, UTAD, SOS, SOW, BU, LPS, etc.
+5. Sesgo: ▲ ALCISTA / ▼ BAJISTA / — NEUTRAL
+6. Creek: Nivel de resistencia o status (✓ Roto)
+7. ICE: Nivel de soporte o status (✓ Roto)
+8. Weis Wave: Absorción ✓ / Normal
+9. SOT: # empujes ⚠ / No detectado
+10. HTF (Contexto superior): Alineación técnica con timeframe mayor
+11. VP (Volume Profile): VPOC y Forma (P, b, D)
+12. Delta: Lectura y Divergencias detectadas
+13. Entrada: Agresiva / Principal / Conservadora / Esperar (incluir R:R)
+14. Esfuerzo/Resultado: Armonía ✓ / Divergencia ⚠
+15. Fortaleza: Barra visual y porcentaje (0-100%)
+16. Alerta Crítica: Riesgo de manipulación o giro inminente
+17. Nivel de Invalidez: Precio exacto de anulación de tesis
+
+SCORING: Fase (30), Spring (15), Volumen (15), Weis (10), SOT (10), Armonía (10), MTF (10)."""
+
+# ── 2. FUNCIONES DE RENDER──────────────────────────────────────────────────
+
+def render_calculator():
+    st.subheader("🛡️ Calculadora de Posición DSD")
+    c1, c2 = st.columns(2)
+    capital = c1.number_input("Capital Total ($)", value=10000.0, step=1000.0)
+    risk_p = c2.slider("Riesgo (%)", 0.1, 5.0, 2.0)
+    
+    c3, c4 = st.columns(2)
+    entry = c3.number_input("Precio Entrada", value=1.08500, format="%.5f")
+    stop = c4.number_input("Precio Stop Loss", value=1.08200, format="%.5f")
+    
+    if entry != stop:
+        risk_dist = abs(entry - stop)
+        max_loss = capital * (risk_p / 100)
+        # Suponiendo pip value en forex para demostración, o contratos directos
+        position_size = max_loss / risk_dist
+        
+        st.success(f"**Pérdida Máxima:** ${max_loss:,.2f}")
+        st.info(f"**Tamaño Sugerido:** {position_size:,.2f} unidades / contratos")
+        st.caption(f"Distancia al SL: {risk_dist:,.5f} unidades")
+
+def render_engine_v7():
+    st.markdown("### 📊 Wyckoff v7 Indicator Intelligence")
+    with st.form("engine_v7_form"):
         c1, c2, c3 = st.columns(3)
-        activo_w   = c1.text_input("Activo", placeholder="US30, EUR/USD, BTC...")
-        timeframe_w= c2.selectbox("Timeframe", ["1H", "4H", "Daily", "Weekly"])
-        precio_w   = c3.text_input("Precio actual", placeholder="5120.50")
-
-        c4, c5 = st.columns(2)
-        estructura = c4.selectbox("Estructura detectada", ["Acumulación", "Distribución", "Sin definir"])
-        esquema    = c5.selectbox("Esquema", ["#1 (con Spring/UTAD)", "#2 (sin sacudida)", "Indefinido"])
-
-        c6, c7, c8 = st.columns(3)
-        fase       = c6.selectbox("Fase actual", ["A", "B", "C", "D", "E"])
-        sesgo      = c7.selectbox("Sesgo", ["ALCISTA", "BAJISTA", "NEUTRAL"])
-        creek_roto = c8.selectbox("Creek", ["✓ Roto (JAC)", "✗ No roto", "N/A"])
-
-        c9, c10, c11 = st.columns(3)
-        ice_nivel  = c9.text_input("Nivel ICE (soporte)", placeholder="0.0000")
-        creek_nivel= c10.text_input("Nivel Creek (resistencia)", placeholder="0.0000")
-        esfuerzo   = c11.selectbox("Esfuerzo vs Resultado", ["Armonía ✓", "Divergencia ⚠"])
-
-        fortaleza  = st.slider("Fortaleza de estructura (%)", 0, 100, 70, 5)
-        notas_extra= st.text_area("Contexto adicional (opcional)", placeholder="Ej: Spring #3 con vol bajo, DXY cayendo, noticias macro esta semana...")
-
-        submitted = st.form_submit_button("🧠 Interpretar con IA", type="primary")
-
-    if submitted and activo_w.strip():
-        prompt = f"""Activo: {activo_w.upper()} | Timeframe: {timeframe_w} | Precio: {precio_w}
-
-LECTURAS DEL INDICADOR:
-- Estructura: {estructura} — Esquema: {esquema}
-- Fase actual: {fase}
-- Sesgo: {sesgo}
-- Creek: {creek_roto} (nivel: {creek_nivel})
-- ICE (soporte): {ice_nivel}
-- Esfuerzo vs Resultado: {esfuerzo}
-- Fortaleza de estructura: {fortaleza}%
-- Contexto adicional: {notas_extra if notas_extra.strip() else 'Ninguno'}
-
-Genera el análisis completo con plan de trading."""
-
-        with st.spinner("Interpretando señales..."):
-            try:
-                from ai_engine import generate
-                result = generate(prompt=prompt, system=_WYCKOFF_SYSTEM, max_tokens=1800)
-                if result:
-                    st.markdown(f"""<div style='background:linear-gradient(135deg,rgba(212,168,67,0.06),rgba(13,21,37,1));
-                        border:1px solid rgba(212,168,67,0.25);border-radius:12px;padding:20px;margin-top:12px;'>
-                        <div style='font-size:12px;color:#d4a843;font-weight:600;margin-bottom:12px;'>
-                        🎯 INTERPRETACIÓN WYCKOFF — {activo_w.upper()} {timeframe_w}</div>
-                    </div>""", unsafe_allow_html=True)
-                    st.markdown(result)
-
-                    # Guardar en historial de sesión
-                    if "wyckoff_interp_history" not in st.session_state:
-                        st.session_state.wyckoff_interp_history = []
-                    st.session_state.wyckoff_interp_history.insert(0, {
-                        "activo": activo_w.upper(), "tf": timeframe_w,
-                        "estructura": estructura, "fase": fase,
-                        "sesgo": sesgo, "result": result,
-                        "time": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
-                    })
-                    st.session_state.wyckoff_interp_history = st.session_state.wyckoff_interp_history[:10]
-                else:
-                    st.warning("La IA no devolvió respuesta. Verifica que DEEPSEEK_API_KEY o GEMINI_API_KEY estén configurados en `.streamlit/secrets.toml`.")
-            except Exception as e:
-                st.error(f"Error: {e}")
-    elif submitted and not activo_w.strip():
-        st.warning("Ingresa el nombre del activo.")
-
-    # Historial de interpretaciones
-    hist = st.session_state.get("wyckoff_interp_history", [])
-    if hist:
-        st.markdown("#### 📋 Interpretaciones recientes")
-        for h in hist[:5]:
-            with st.expander(f"🎯 {h['activo']} {h['tf']} | {h['estructura']} Fase {h['fase']} | {h['time']}", expanded=False):
-                st.markdown(h["result"])
-
+        symbol = c1.text_input("Activo", "EURUSD")
+        tf = c2.selectbox("TF", ["15m", "1H", "4H", "1D"])
+        price = c3.text_input("Precio", "1.1000")
+        
+        c4, c5, c6 = st.columns(3)
+        struct = c4.selectbox("Estructura", ["Acumulación", "Distribución", "Cambiando"])
+        phase = c5.selectbox("Fase", ["A", "B", "C", "D", "E"])
+        event = c6.text_input("Evento", "Spring #3")
+        
+        c7, c8, c9 = st.columns(3)
+        weis = c7.selectbox("Weis Wave", ["Absorción ✓", "Normal", "Débil"])
+        sot = c8.selectbox("SOT", ["3+ empujes ⚠", "2 empujes", "Ninguno"])
+        mtf = c9.selectbox("Alineación HTF", ["Alineado ✓", "Neutral", "Conflicto ⚠"])
+        
+        submitted = st.form_submit_button("🧠 ANALIZAR CON IA v7")
+        
+    if submitted:
+        # Calcular score simplificado para feedback visual inmediato
+        fase_pts = {"A":5, "B":10, "C":18, "D":25, "E":30}[phase]
+        score = fase_pts + (15 if "Spring" in event else 5) + (10 if "Absorción" in weis else 0) + (10 if "3+" in sot else 0)
+        
+        prompt = f"Activo: {symbol} @ {tf} - Estructura: {struct}, Fase: {phase}, Evento: {event}, Weis: {weis}, SOT: {sot}, MTF: {mtf}. Fortaleza: {score}%"
+        from ai_engine import generate
+        res = generate(prompt, system=_WYCKOFF_SYSTEM_V7)
+        if res:
+            st.markdown(res)
+            st.session_state["last_v7_analysis"] = {"phase": phase, "event": event, "fortaleza": score}
 
 def render():
-    st.markdown("""
-        <div style='text-align:center; padding: 10px 0 20px 0;'>
-            <h2>📋 Plan de Trading Institucional</h2>
-            <p style='color:#a0a0a0;'>Ejecución, Sistematicidad y Disciplina</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Persistencia del journal
-    if "trading_journal_df" not in st.session_state:
-        st.session_state.trading_journal_df = pd.DataFrame(columns=JOURNAL_COLUMNS)
-
+    st.markdown("<h2 style='text-align: center;'>📋 Plan de Trading Integral DSD v7</h2>", unsafe_allow_html=True)
+    
     tabs = st.tabs([
-        "📅 Rutina Semanal",
-        "🧠 Metodología",
-        "📊 Activos & Sesgos",
-        "✅ Checklist",
-        "📝 Análisis Dominical",
-        "🔔 Alertas",
-        "📖 Journal",
-        "🗒️ Notas Semanales",
-        "🎯 Intérprete Wyckoff",
+        "👤 Perfil", "🎯 Activos", "🔗 Correlaciones", "🗓️ Rutina Dom", "📅 Rutina Diaria",
+        "⚙️ Config", "📈 Criterios", "🛡️ Riesgo", "✅ Checklists", "📊 Engine v7",
+        "🎯 Mercados", "📖 Ejemplos", "🗒️ Notas", "📚 Glosario"
     ])
-
-    # ── 1. Rutina Semanal ────────────────────────────────────────────────────
+    
+    # 1. PERFIL
     with tabs[0]:
-        st.subheader("Distribución Semanal")
-        st.caption("Estructura de tiempo para maximizar enfoque y minimizar ruido.")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(kpi("Horas/Semana", "7h", "Máxima eficiencia", "blue"), unsafe_allow_html=True)
-        c2.markdown(kpi("Activos", "14 Max", "Focus", "purple"), unsafe_allow_html=True)
-        c3.markdown(kpi("Timeframes", "4 TF", "Top-Down", "green"), unsafe_allow_html=True)
-        c4.markdown(kpi("R:R Mínimo", "1:3", "Gestión riesgo", "orange"), unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame(RUTINA_HORARIOS), use_container_width=True, hide_index=True)
-        st.warning("**REGLA DE ORO:** Si no está en el plan del domingo, NO se opera.")
-
-    # ── 2. Metodología ──────────────────────────────────────────────────────
+        st.subheader("1. Identidad Operativa")
+        st.table(pd.DataFrame(PERFIL_TRADER))
+    
+    # 2. ACTIVOS
     with tabs[1]:
-        st.subheader("Flujo Top-Down y Conceptos Clave")
-        st.markdown("""**Flujo:** 1W → 1D → 4H → 1H
+        st.subheader("2. Matriz de Activos (13)")
+        st.dataframe(pd.DataFrame(ACTIVOS_PRIORIZADOS), use_container_width=True, hide_index=True)
+        st.divider()
+        st.subheader("🎯 Enfoque Semanal (Máx 4)")
+        st.multiselect("Selecciona tus 4 activos prioritarios:", [a["Símbolo"] for a in ACTIVOS_PRIORIZADOS], default=["ES / SPX500", "NQ / NAS100", "EURUSD", "XAUUSD"])
 
-| Regla | Valor |
-|---|---|
-| Stop Loss | Más allá del POI invalidante |
-| Take Profit 1 | Siguiente zona de liquidez |
-| Take Profit 2 | OB opuesto en 4H |
-| R:R mínimo | **1:3** |
-| Break Even | Al alcanzar TP1 |""")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info("**BOS/CHoCH**: Break of Structure y Change of Character.")
-            st.success("**OB (Order Block)**: Huella institucional, zona de mitigación.")
-        with col2:
-            st.warning("**FVG (Fair Value Gap)**: Ineficiencia que el precio suele llenar.")
-            st.error("**Liquidity Sweep**: Barrida de stops antes de la dirección real.")
-
-    # ── 3. Activos & Sesgos ─────────────────────────────────────────────────
+    # 3. CORRELACIONES
     with tabs[2]:
-        st.subheader("Watchlist Operativa")
-        st.dataframe(pd.DataFrame(ACTIVOS), use_container_width=True, hide_index=True)
+        st.subheader("3. Inter-dependencia de Mercados")
+        st.dataframe(pd.DataFrame(CORRELACIONES), use_container_width=True, hide_index=True)
+        st.info("**Reglas de Correlación:**\n1. DXY sube → Evitar LONGS en Forex/Oro.\n2. VIX > 20 → Reducir riesgo en Índices al 50%.\n3. US10Y Volátil → Precaución en NQ (Tecnológicas).\n4. BTC/NAS100 Divergencia → Esperar confirmación.")
 
-    # ── 4. Checklist ─────────────────────────────────────────────────────────
+    # 4. RUTINA DOMINICAL
     with tabs[3]:
-        st.subheader("Checklist Diario de Ejecución")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("### 🌅 Mañana (7:00 AM)")
-            for i, item in enumerate(CHECKLIST_MORNING):
-                st.checkbox(item, key=f"am_{i}")
-        with col2:
-            st.markdown("### 🏙️ NY Open (12:00 PM)")
-            for i, item in enumerate(CHECKLIST_LUNCH):
-                st.checkbox(item, key=f"ny_{i}")
-        with col3:
-            st.markdown("### 🌙 Tokyo / Cierre (6:30 PM)")
-            for i, item in enumerate(CHECKLIST_EVENING):
-                st.checkbox(item, key=f"tk_{i}")
+        st.subheader("4. Análisis de Fin de Semana (2h)")
+        c1, c2 = st.columns([1, 2])
+        c1.markdown("**Horario:** 10:00 - 12:00 am (COL)")
+        c1.table(pd.DataFrame([{"Fase": "1. Macro", "Mins": 30}, {"Fase": "2. Técnico", "Mins": 60}, {"Fase": "3. Plan", "Mins": 30}]))
+        with c2:
+            st.markdown("**Checklist Macro Semanal:**")
+            st.checkbox("DXY Semanal: Tendencia y Nivel VAL/VAH")
+            st.checkbox("VIX: Nivel (<15 Calma / >20 Miedo)")
+            st.checkbox("US10Y: Cambio significativo (>0.20%)")
+            st.checkbox("Calendario: Identificar CPI, FOMC, NFP")
+        
+        st.divider()
+        st.markdown("#### Plan Semanal (Lunes - Viernes)")
+        st.data_editor(pd.DataFrame([{"Día": d, "Activo": "", "Setup": "Pendiente"} for d in ["Lun", "Mar", "Mie", "Jue", "Vie"]]), use_container_width=True)
 
-    # ── 5. Análisis Dominical ────────────────────────────────────────────────
+    # 5. RUTINA DIARIA
     with tabs[4]:
-        st.subheader("Plantilla de Análisis Dominical")
-        st.markdown("*(Completa los domingos por la noche antes de la semana)*")
-        with st.form("form_dominical"):
-            st.text_area("Contexto Macro (DXY / Fundamentales)", placeholder="DXY en resistencia semanal, sesgo...", key="dom_macro")
-            st.text_area("Activos en Zona Premium", placeholder="XAU en OB diario, EUR acumulando...", key="dom_premium")
-            st.text_area("Setups Prioritarios (máx 4)", placeholder="1. EUR/USD Short en 1.0850...", key="dom_setups")
-            st.text_area("Niveles de Invalidación", placeholder="Si XAU rompe 2115 → cierra idea larga", key="dom_inv")
-            if st.form_submit_button("💾 Guardar Análisis Semanal"):
-                st.success("✅ Análisis guardado para la semana.")
+        st.subheader("5. Ciclo Operativo Diario")
+        st.table(pd.DataFrame(RUTINA_DIARIA))
+        st.info("**Golden Hour (8:30-9:30):** Foco máximo en apertura NY (ES/NQ).")
 
-    # ── 6. Alertas ───────────────────────────────────────────────────────────
+    # 6. CONFIGURACION
     with tabs[5]:
-        st.subheader("Alertas Activas")
-        st.dataframe(pd.DataFrame(ALERTAS), use_container_width=True, hide_index=True)
-        with st.expander("➕ Añadir Alerta"):
-            with st.form("alert_form"):
-                c1, c2 = st.columns(2)
-                n_act  = c1.text_input("Activo")
-                n_tipo = c2.selectbox("Tipo", ["Entrada", "Invalidación", "Referencia"])
-                c3, c4 = st.columns(2)
-                n_niv  = c3.text_input("Nivel")
-                n_prot = c4.text_input("Protocolo")
-                if st.form_submit_button("Añadir"):
-                    st.info("Alerta registrada (requiere conexión a BD para persistir).")
+        st.subheader("6. Parámetros Técnicos v7")
+        st.markdown("""
+        | Parámetro | Swing | Intradía |
+        |---|---|---|
+        | Pivotes | 20 | 10 |
+        | ATR | 20 | 14 |
+        | Clímax | 2.5 | 2.0 |
+        | VP Contexto | Weekly | Daily |
+        """)
+        st.divider()
+        st.subheader("Interpretación del Dashboard")
+        st.markdown("- **Estructura:** Define sesgo. ▲=Long / ▼=Short.\n- **Fase C/D:** Fases operativas. A/B=Espera.\n- **Weis Absorción:** Institucionales entrando ✓.\n- **Fortaleza >70%:** Alta probabilidad operativa.")
 
-    # ── 7. Journal ───────────────────────────────────────────────────────────
+    # 7. CRITERIOS
     with tabs[6]:
-        st.subheader("Journal de Operaciones")
-        with st.expander("📌 Registrar Nuevo Trade", expanded=False):
-            with st.form("journal_form_v2"):
-                c1, c2, c3 = st.columns(3)
-                date    = c1.date_input("Fecha", value=pd.Timestamp.today())
-                activo  = c2.selectbox("Activo", [a["Activo"] for a in ACTIVOS] + ["Otro"])
-                tipo    = c3.selectbox("Tipo", ["Long", "Short"])
-                c4, c5, c6 = st.columns(3)
-                entrada = c4.number_input("Entrada", format="%.5f")
-                salida  = c5.number_input("Salida", format="%.5f", value=0.0)
-                pips    = c6.number_input("Pips/Pts", step=1.0)
-                resultado = st.selectbox("Resultado", ["Ganancia", "Pérdida", "Break Even"])
-                notas  = st.text_area("Notas / Aprendizajes")
-                if st.form_submit_button("💾 Guardar"):
-                    new_trade = pd.DataFrame([{
-                        "Fecha": date, "Activo": activo, "Tipo": tipo,
-                        "Entrada": entrada,
-                        "Salida": salida if salida != 0 else pd.NA,
-                        "Pips/Pts": pips, "Resultado": resultado, "Notas": notas,
-                    }])
-                    st.session_state.trading_journal_df = pd.concat(
-                        [st.session_state.trading_journal_df, new_trade], ignore_index=True)
-                    st.success("✅ Trade registrado.")
+        st.subheader("7. Patrones Wyckoff 2.0")
+        with st.expander("PATRÓN 1: Spring (Acumulación Alcista)"):
+            st.write("Cae bajo VAL con volumen < 80%. Entrada al recuperar rango.")
+        with st.expander("PATRÓN 2: Upthrust (Distribución Bajista)"):
+            st.write("Sube sobre VAH con volumen < 80%. Entrada al re-entrar al rango.")
+        with st.expander("PATRÓN 3: Test VPOC (Continuación)"):
+            st.write("Retroceso a zona de valor con volumen bajo. Gatillo en dirección tendencia.")
 
-        st.dataframe(st.session_state.trading_journal_df, use_container_width=True, hide_index=True)
-        df_j = st.session_state.trading_journal_df
-        if not df_j.empty:
-            ganadoras = len(df_j[df_j["Resultado"] == "Ganancia"])
-            perdedoras = len(df_j[df_j["Resultado"] == "Pérdida"])
-            be = len(df_j[df_j["Resultado"] == "Break Even"])
-            total = len(df_j)
-            wr = (ganadoras / (total - be)) * 100 if (total - be) > 0 else 0
-            c1, c2, c3 = st.columns(3)
-            c1.markdown(kpi("Win Rate", f"{wr:.1f}%", f"{ganadoras}W / {perdedoras}L", "green" if wr >= 50 else "red"), unsafe_allow_html=True)
-            c2.markdown(kpi("Trades", str(total), f"{be} BE", "blue"), unsafe_allow_html=True)
-            c3.markdown(kpi("Pips Netos", f"{df_j['Pips/Pts'].sum():.1f}", "Total", "orange"), unsafe_allow_html=True)
-
-    # ── 8. Notas Semanales ───────────────────────────────────────────────────
+    # 8. RIESGO
     with tabs[7]:
-        st.subheader("🗒️ Notas Semanales")
-        st.caption("Espacio libre para contexto de mercado, aprendizajes o recordatorios de la semana.")
+        st.subheader("8. Gestión Institucional")
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(kpi("Máx Trade", "2%", "Riesgo x capital", "blue"), unsafe_allow_html=True)
+        c2.markdown(kpi("Máx Semanal", "8%", "Pausa obligatoria", "orange"), unsafe_allow_html=True)
+        c3.markdown(kpi("Drawdown", "15%", "Hard Stop Cuenta", "red"), unsafe_allow_html=True)
+        st.divider()
+        render_calculator()
 
-        semana_key = f"notas_{pd.Timestamp.now().strftime('%Y-W%U')}"
-        notas_actuales = st.session_state.get(semana_key, "")
-
-        notas_input = st.text_area(
-            f"Semana {pd.Timestamp.now().strftime('%Y · Semana %U')}",
-            value=notas_actuales,
-            height=280,
-            placeholder="Ej: DXY en zona crítica. EUR/USD acumulando en 1.0800. Evitar operar martes por CPI...",
-            key="notas_semana_input"
-        )
-        col_btn1, col_btn2, _ = st.columns([1, 1, 4])
-        if col_btn1.button("💾 Guardar Notas"):
-            st.session_state[semana_key] = notas_input
-            st.success("✅ Notas guardadas.")
-        if col_btn2.button("🗑️ Limpiar"):
-            st.session_state[semana_key] = ""
-            st.rerun()
-
-        # Notas de semanas anteriores
-        semanas_guardadas = {k: v for k, v in st.session_state.items()
-                             if k.startswith("notas_") and k != semana_key and v}
-        if semanas_guardadas:
-            st.markdown("#### Semanas anteriores")
-            for k, v in sorted(semanas_guardadas.items(), reverse=True)[:4]:
-                with st.expander(k.replace("notas_", "📅 "), expanded=False):
-                    st.markdown(v)
-
-    # ── 9. Intérprete Wyckoff ────────────────────────────────────────────────
+    # 9. CHECKLISTS
     with tabs[8]:
-        _render_wyckoff_interpreter()
+        st.subheader("9. Listas de Verificación (DSD)")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**Pre-Entrada (23)**")
+            for i in range(5): st.checkbox(CHECKLIST_DSD_23[i], key=f"pre_{i}")
+            st.caption("... Ver todos en el manual")
+        with c2:
+            st.markdown("**Post-Entrada (17)**")
+            for i in range(5): st.checkbox(CHECKLIST_POST_17[i], key=f"post_{i}")
+        with c3:
+            st.markdown("**Cierre (16)**")
+            for i in range(5): st.checkbox(CHECKLIST_CIERRE_16[i], key=f"cie_{i}")
+
+    # 10. ENGINE V7
+    with tabs[9]:
+        render_engine_v7()
+
+    # 11. MERCADOS
+    with tabs[10]:
+        st.subheader("11. Contexto por Mercado")
+        m = st.radio("Selecciona:", ["Forex", "Crypto", "Índices"], horizontal=True)
+        if m == "Forex": st.write("Fases B largas. Sensible a noticias USD (DXY).")
+        elif m == "Crypto": st.write("Volatilidad extrema. Springs agresivos. MTF es obligatorio.")
+        else: st.write("Estructuras muy limpias. Sesión NY es la clave.")
+
+    # 12. EJEMPLOS
+    with tabs[11]:
+        st.subheader("12. Simulaciones de Interpretación")
+        st.info("Revisa la documentación v7 para 3 ejemplos detallados (EURUSD, BTC, SPX500).")
+
+    # 13. NOTAS
+    with tabs[12]:
+        st.subheader("13. Bitácora Semanal")
+        week_key = f"notes_{datetime.now().strftime('%Y_%W')}"
+        notes = st.text_area("Notas / Análisis Personal", value=st.session_state.get(week_key, ""), height=300)
+        if st.button("Guardar Notas"):
+            st.session_state[week_key] = notes
+            st.success("Notas guardadas para esta semana.")
+
+    # 14. GLOSARIO
+    with tabs[13]:
+        st.subheader("14. Terminología Wyckoff")
+        for k, v in GLOSARIO_COMPLETO.items():
+            st.markdown(f"**{k}:** {v}")

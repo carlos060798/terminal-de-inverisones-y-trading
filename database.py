@@ -204,6 +204,13 @@ def init_db():
         "ALTER TABLE trades ADD COLUMN trade_rating INTEGER DEFAULT 3",
         "ALTER TABLE trades ADD COLUMN stop_loss REAL",
         "ALTER TABLE trades ADD COLUMN take_profit REAL",
+        "ALTER TABLE trades ADD COLUMN phase TEXT DEFAULT ''",
+        "ALTER TABLE trades ADD COLUMN event TEXT DEFAULT ''",
+        "ALTER TABLE trades ADD COLUMN abs_detected INTEGER DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN sot_detected INTEGER DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN dxy_aligned INTEGER DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN vix_context REAL DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN score_fortaleza INTEGER DEFAULT 0",
     ]:
         try:
             c.execute(col_def)
@@ -215,6 +222,14 @@ def init_db():
         "ALTER TABLE forex_trades ADD COLUMN hold_time INTEGER DEFAULT 0",
         "ALTER TABLE forex_trades ADD COLUMN setup_type TEXT DEFAULT ''",
         "ALTER TABLE forex_trades ADD COLUMN trade_rating INTEGER DEFAULT 3",
+        "ALTER TABLE forex_trades ADD COLUMN phase TEXT DEFAULT ''",
+        "ALTER TABLE forex_trades ADD COLUMN event TEXT DEFAULT ''",
+        "ALTER TABLE forex_trades ADD COLUMN abs_detected INTEGER DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN sot_detected INTEGER DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN dxy_aligned INTEGER DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN vix_context REAL DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN risk_pct REAL DEFAULT 0",
+        "ALTER TABLE forex_trades ADD COLUMN score_fortaleza INTEGER DEFAULT 0",
     ]:
         try:
             c.execute(col_def)
@@ -301,7 +316,10 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
               exit_price, shares, strategy, psych_notes,
               lecciones="", errores="",
               setup_type="", error_type="", trade_rating=3,
-              stop_loss=None, take_profit=None):
+              stop_loss=None, take_profit=None,
+              risk_pct=0.0, phase="", event="",
+              abs_detected=0, sot_detected=0, dxy_aligned=0,
+              vix_context=0.0, score_fortaleza=0):
     pnl, pnl_pct = None, None
     if exit_price and exit_price > 0:
         if trade_type == "Compra":
@@ -316,12 +334,14 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
         """INSERT INTO trades
            (trade_date, ticker, trade_type, entry_price, exit_price,
             shares, pnl, pnl_pct, strategy, psych_notes, lecciones, errores,
-            setup_type, error_type, trade_rating, stop_loss, take_profit)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            setup_type, error_type, trade_rating, stop_loss, take_profit,
+            risk_pct, phase, event, abs_detected, sot_detected, dxy_aligned, vix_context, score_fortaleza)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), ticker.upper(), trade_type, entry_price,
          exit_price, shares, pnl, pnl_pct, strategy, psych_notes,
          lecciones, errores, setup_type, error_type, trade_rating,
-         stop_loss, take_profit)
+         stop_loss, take_profit, risk_pct, phase, event, abs_detected,
+         sot_detected, dxy_aligned, vix_context, score_fortaleza)
     )
     conn.commit()
     conn.close()
@@ -500,19 +520,23 @@ def get_analyzed_tickers() -> list:
 def add_forex_trade(trade_date, instrument, instrument_type, direction,
                     lots, entry_price, exit_price, stop_loss, take_profit,
                     pips, pnl, commission, swap, strategy, timeframe, session, notes,
-                    setup_type="", trade_rating=3):
+                    setup_type="", trade_rating=3,
+                    phase="", event="", abs_detected=0, sot_detected=0,
+                    dxy_aligned=0, vix_context=0.0, risk_pct=0.0, score_fortaleza=0):
     conn = get_connection()
     conn.execute(
         """INSERT INTO forex_trades
            (trade_date, instrument, instrument_type, direction, lots,
             entry_price, exit_price, stop_loss, take_profit, pips, pnl,
             commission, swap, strategy, timeframe, session, notes,
-            setup_type, trade_rating)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            setup_type, trade_rating, phase, event, abs_detected,
+            sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), instrument.upper(), instrument_type, direction,
          lots, entry_price, exit_price, stop_loss, take_profit,
          pips, pnl, commission, swap, strategy, timeframe, session, notes,
-         setup_type, trade_rating)
+         setup_type, trade_rating, phase, event, abs_detected,
+         sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza)
     )
     conn.commit()
     conn.close()
