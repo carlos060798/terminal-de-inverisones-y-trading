@@ -6,6 +6,8 @@ Computes fair value estimates using multiple methods:
 3. PEG-based valuation
 """
 import yfinance as yf
+import pandas as pd
+import numpy as np
 
 # Sector median P/E ratios (approximate, based on historical averages)
 SECTOR_PE = {
@@ -525,7 +527,8 @@ def compute_health_scores(ticker: str) -> dict:
     Returns dict with z_score, z_label, f_score, f_label, and component details.
     """
     result = {"z_score": None, "z_label": None, "f_score": None, "f_label": None,
-              "z_details": {}, "f_details": {}}
+              "sloan_ratio": None, "sloan_label": None,
+              "z_details": {}, "f_details": {}, "sloan_details": {}}
     try:
         tk = yf.Ticker(ticker)
         info = tk.info
@@ -641,6 +644,18 @@ def compute_health_scores(ticker: str) -> dict:
             f_points += 1
         f_details["Asset turnover > 0.5"] = at > 0.5
 
+        # ── SLOAN RATIO ──
+        # Formula: (NI - CFO - CFI) / Total Assets
+        cfi = _get(cashflow, ["Investing Cash Flow", "Total Cash From Investing Activities"])
+        if all(v is not None for v in [net_income, cfo, cfi, total_assets]) and total_assets > 0:
+            sloan = (net_income - cfo - cfi) / total_assets
+            result["sloan_ratio"] = round(sloan, 4)
+            if -0.10 <= sloan <= 0.10:
+                result["sloan_label"] = "SAFE"
+            else:
+                result["sloan_label"] = "WARNING (High Accruals)"
+            result["sloan_details"] = {"NI": net_income, "CFO": cfo, "CFI": cfi, "TA": total_assets}
+
         result["f_score"] = f_points
         result["f_details"] = f_details
         if f_points >= 7:
@@ -655,7 +670,7 @@ def compute_health_scores(ticker: str) -> dict:
     return result
 
 
-def compute_dcf_professional(ticker: str) -> dict:
+def compute_dcf_professional(ticker: str, wacc_override: float = None) -> dict:
     """Institutional DCF following InValor/JPMorgan methodology."""
     try:
         tk = yf.Ticker(ticker)
@@ -723,8 +738,12 @@ def compute_dcf_professional(ticker: str) -> dict:
 
         # Step 3: Terminal Value (Gordon Growth)
         g = 0.03
-        wacc_data = compute_wacc(ticker)
-        wacc = wacc_data.get('wacc', 0.10) if wacc_data else 0.10
+        if wacc_override is not None:
+            wacc = wacc_override
+        else:
+            wacc_data = compute_wacc(ticker)
+            wacc = wacc_data.get('wacc', 0.10) if wacc_data else 0.10
+        
         if wacc <= g:
             wacc = g + 0.02
 
@@ -794,7 +813,6 @@ def compute_dcf_professional(ticker: str) -> dict:
 def monte_carlo_dcf(ticker, n_simulations=1000, wacc_sigma=0.01, growth_sigma=0.02, g_sigma=0.005):
     """Monte Carlo simulation over DCF, varying WACC, revenue growth, and terminal g.
     Returns distribution of fair values with probability metrics."""
-    import numpy as np
     try:
         base = compute_dcf_professional(ticker)
         if not base or "error" in base:
@@ -1358,3 +1376,124 @@ def compute_fundamental_score_v2(ticker: str) -> dict:
         "sustainable_g": (sf(info.get("returnOnEquity")) * 100) * (1 - sf(info.get("payoutRatio", 0.0)))
     }
 
+def compute_advanced_dividends(ticker: str) -> dict:
+    """
+    Calcula Payout FCF, YoC (Yield on Cost) proyectado y CAGR de dividendos.
+    """
+    res = {"payout_fcf": None, "yoc_5y": None, "yoc_10y": None, "dgr_5y": None}
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        divs = tk.dividends
+        
+        # Payout FCF
+        div_paid = abs(info.get("dividendRate", 0) * info.get("sharesOutstanding", 0))
+        cf = tk.cashflow
+        if cf is not None and not cf.empty:
+            ocf = None
+            for label in ["Operating Cash Flow", "Total Cash From Operating Activities"]:
+                if label in cf.index: ocf = float(cf.loc[label].iloc[0]); break
+            capex = 0
+            for label in ["Capital Expenditure", "Capital Expenditures"]:
+                if label in cf.index: capex = abs(float(cf.loc[label].iloc[0])); break
+            if ocf:
+                fcf = ocf - capex
+                if fcf > 0:
+                    res["payout_fcf"] = (div_paid / fcf) * 100
+
+        # DGR & YoC
+        if not divs.empty:
+            divs_annual = divs.resample('Y').sum()
+            if len(divs_annual) >= 6:
+                dgr = ((divs_annual.iloc[-1] / divs_annual.iloc[-6]) ** (1/5) - 1)
+                res["dgr_5y"] = dgr * 100
+                current_yield = info.get("dividendYield", 0)
+                if current_yield:
+                    res["yoc_5y"] = current_yield * (1 + dgr)**5 * 100
+                    res["yoc_10y"] = current_yield * (1 + dgr)**10 * 100
+    except: pass
+    return res
+def solve_implied_growth(ticker: str, target_price: float = None) -> float:
+    """
+    Calcula la tasa de crecimiento implícita (g) que justifica el precio actual.
+    Utiliza una búsqueda binaria para converger al valor de g en un modelo DCF.
+    """
+    try:
+        base = compute_dcf_professional(ticker)
+        if not base or "fcff" not in base: return None
+        
+        price = target_price or base.get("current_price", 0)
+        if not price or price <= 0: return None
+        
+        fcff = base.get("fcff", 0)
+        wacc = base.get("wacc", 0.10)
+        debt = base.get("total_debt", 0)
+        cash = base.get("cash", 0)
+        shares = base.get("shares", 1)
+        terminal_g = base.get("terminal_g", 0.03)
+
+        # Búsqueda binaria para g (crecimiento de los próximos 5 años)
+        low, high = -0.5, 1.5
+        for _ in range(25):
+            mid = (low + high) / 2
+            # Proyección 5 años
+            prov_fcffs = [fcff * (1 + mid)**i for i in range(1, 6)]
+            # Valor Terminal
+            tv = (prov_fcffs[-1] * (1 + terminal_g) / (wacc - terminal_g)) if wacc > terminal_g else 0
+            # Present Value
+            pv = sum(f / (1+wacc)**t for t, f in enumerate(prov_fcffs, 1)) + (tv / (1+wacc)**5)
+            implied_equity = pv - debt + cash
+            implied_price = implied_equity / shares
+            
+            if implied_price < price:
+                low = mid
+            else:
+                high = mid
+        return round(mid * 100, 2)
+    except: return None
+
+def get_magic_formula_ranking(tickers: list) -> pd.DataFrame:
+    """
+    Clasifica una lista de tickers según la 'Magic Formula' (Earnings Yield + ROC).
+    """
+    results = []
+    for t in tickers:
+        try:
+            tk = yf.Ticker(t)
+            # Use financial info
+            ebit = tk.info.get("ebitda", 0) * 0.8 # proxy
+            # Try to get real EBIT from financials
+            fins = tk.financials
+            if not fins.empty and "Operating Income" in fins.index:
+                ebit = fins.loc["Operating Income"].iloc[0]
+            
+            ev = tk.info.get("enterpriseValue", 1)
+            ey = ebit / ev if ev > 0 else 0
+            
+            # ROC approx: EBIT / (Total Assets - Current Liabilities)
+            ta = tk.info.get("totalAssets", 1)
+            cl = tk.info.get("totalCurrentLiabilities", 0)
+            ic = ta - cl
+            roc = ebit / ic if ic > 0 else 0
+            
+            # Filter outliers
+            if ey > 1.0 or roc > 2.0: continue
+            
+            results.append({
+                "Ticker": t,
+                "Earnings Yield (%)": round(ey * 100, 2),
+                "ROC (%)": round(roc * 100, 2)
+            })
+        except: continue
+        
+    if not results: return pd.DataFrame()
+    
+    df = pd.DataFrame(results)
+    # Filter negatives (Greenblatt usually skips banks and utilities, but here we just check metrics)
+    df = df[df["Earnings Yield (%)"] > 0]
+    
+    df["Rank EY"] = df["Earnings Yield (%)"].rank(ascending=False)
+    df["Rank ROC"] = df["ROC (%)"].rank(ascending=False)
+    df["Magic Score"] = df["Rank EY"] + df["Rank ROC"]
+    
+    return df.sort_values("Magic Score")

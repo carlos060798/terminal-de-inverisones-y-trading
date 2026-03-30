@@ -1238,7 +1238,7 @@ def render():
                                 s_res = sentiment.aggregate_sentiment(mock_headlines)
                                 st.markdown(f"**Score Promedio (-1 Bearish a +1 Bullish): {s_res['avg_score']}**")
                                 st.write(f"Bullish: {s_res['bullish']} | Bearish: {s_res['bearish']}")
-                                st.dataframe(pd.DataFrame(s_res['details']), use_container_width=True)
+                                st.dataframe(pd.DataFrame(s_res.get('details', [])), use_container_width=True)
 
                 # ── AI ANALYSIS (PDF) ──
                 if ticker_name and ticker_name != uploaded.name.replace(".pdf", ""):

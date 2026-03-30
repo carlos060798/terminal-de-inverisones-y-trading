@@ -54,7 +54,7 @@ def aggregate_sentiment(headlines: list) -> dict:
     """Calcula un score macro de los titulares (bullish/bearish ratio)."""
     analyzed = analyze_sentiment_finbert(headlines)
     if not analyzed or "error" in analyzed[0]:
-        return {"bullish": 0, "bearish": 0, "neutral": len(headlines), "avg_score": 0.5}
+        return {"bullish": 0, "bearish": 0, "neutral": len(headlines), "avg_score": 0.5, "details": analyzed if analyzed else []}
         
     bull = sum(1 for a in analyzed if a['label'] == 'positive')
     bear = sum(1 for a in analyzed if a['label'] == 'negative')

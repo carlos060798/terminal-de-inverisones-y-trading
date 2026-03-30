@@ -605,6 +605,7 @@ with _hdr2:
 _active = sac.tabs([
     sac.TabsItem(label="Dashboard", icon="house"),
     sac.TabsItem(label="Acciones", icon="graph-up-arrow"),
+    sac.TabsItem(label="Valor", icon="gem"),
     sac.TabsItem(label="Screener", icon="search"),
     sac.TabsItem(label="Tesis", icon="bullseye"),
     sac.TabsItem(label="Watchlist", icon="eye"),
@@ -623,6 +624,7 @@ _active = sac.tabs([
 _routes = {
     "Dashboard": "sections.dashboard",
     "Acciones": "sections.stock_analyzer",
+    "Valor": "sections.value_center",
     "Screener": "sections.screener",
     "Tesis": "sections.investment_thesis",
     "Watchlist": "sections.watchlist",
