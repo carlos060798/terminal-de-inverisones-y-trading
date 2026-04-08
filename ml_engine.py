@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
+try:
+    import shap
+    HAS_SHAP = True
+except ImportError:
+    HAS_SHAP = False
+
 MODEL_DIR = Path(__file__).parent / "ml_models"
 
 # S&P 100 tickers for training
@@ -166,6 +172,25 @@ class SmartScorer:
             return max(0, min(100, int(50 + raw * 200)))
         except Exception:
             return 50
+
+    def explain_score(self, features_dict):
+        """Explain the score using SHAP values."""
+        if not HAS_SHAP or not self.trained:
+            return None
+        try:
+            df = pd.DataFrame([features_dict])
+            X = self.scaler.transform(df)
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+            
+            # Map features to their SHAP values
+            contributions = dict(zip(FEATURE_COLS, shap_values[0]))
+            # Scale contributions roughly to the 0-100 score impact (raw * 200 approx)
+            # This is heuristic but helpful for UI
+            impacts = {k: round(v * 200, 1) for k, v in contributions.items()}
+            return sorted(impacts.items(), key=lambda x: abs(x[1]), reverse=True)
+        except Exception:
+            return None
 
     def feature_importance(self):
         try:

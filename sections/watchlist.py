@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import database as db
 from ui_shared import DARK, dark_layout, fmt, kpi
+import matplotlib.pyplot as plt
 
 try:
     from pypfopt import EfficientFrontier, risk_models, expected_returns
@@ -29,6 +30,12 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
+
+try:
+    import riskfolio as rp
+    HAS_RISKFOLIO = True
+except ImportError:
+    HAS_RISKFOLIO = False
 
 
 def _calc_rsi(series, period=14):
@@ -79,9 +86,13 @@ def render():
         watchlist_data = db.get_watchlist_by_list(active_list)
 
     # ── TABS ──
-    tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim, tab_opt, tab_rebal, tab_charts_multi = st.tabs([
+    (tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim,
+     tab_opt, tab_rebal, tab_charts_multi, tab_stress, tab_volprof, tab_optflow,
+     tab_breadth, tab_maxpain, tab_squeeze, tab_seasonal, tab_pairs) = st.tabs([
         "📊 Cartera", "📈 Análisis Técnico", "🏛️ Benchmark", "💰 Dividendos", "🧮 Calculadora",
-        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización", "⚖️ Rebalanceo", "📊 Charts"
+        "🔗 Correlación", "📅 Earnings", "🎲 Simulación", "📐 Optimización", "⚖️ Rebalanceo", "📊 Charts",
+        "🔥 Stress Test", "📊 Vol. Profile", "🕵️ Opciones Flow",
+        "📡 Market Breadth", "⚡ Max Pain", "🔀 Short Squeeze", "📅 Estacionalidad", "🔗 Pairs Trading"
     ])
 
     # ══════════════════════════════════════════════════════════════
@@ -89,20 +100,27 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_port:
         with st.expander("➕  Agregar nueva posición"):
-            c1, c2, c3, c4 = st.columns(4)
-            new_tick  = c1.text_input("Ticker", placeholder="AAPL")
-            new_share = c2.number_input("Acciones", min_value=0.0, step=1.0)
-            new_cost  = c3.number_input("Precio promedio ($)", min_value=0.0, step=0.01)
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
+            new_tick  = c1.text_input("Ticker", placeholder="AAPL…")
+            new_share = c2.number_input("Acciones", min_value=0.1, step=0.1, value=1.0)
+            new_cost  = c3.number_input("Coste ($)", min_value=0.01, step=0.01, value=150.0)
             new_sect  = c4.selectbox("Sector", ["", "Tecnología", "Salud", "Finanzas", "Energía",
                                                  "Consumo", "Industria", "Materiales", "Utilities", "Otro"])
-            c5, c6 = st.columns([3, 1])
+            
+            c5, c6, c7 = st.columns([2, 1, 1])
             new_notes = c5.text_input("Notas")
-            with c6:
+            new_sl = c6.number_input("Stop Loss ($)", min_value=0.0, step=0.01, value=0.0)
+            new_tp = c7.number_input("Take Profit ($)", min_value=0.0, step=0.01, value=0.0)
+            
+            with st.container():
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Agregar ticker"):
+                if st.button("Agregar ticker", use_container_width=True):
                     if new_tick.strip():
                         target = active_list if active_list != 'Todas' else 'Principal'
-                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes, target)
+                        # Handle 0 as None for SL/TP
+                        sl_val = new_sl if new_sl > 0 else None
+                        tp_val = new_tp if new_tp > 0 else None
+                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes, target, sl_val, tp_val)
                         st.success(f"✅ {new_tick.upper()} agregado a '{target}'.")
                         st.rerun()
 
@@ -220,8 +238,23 @@ def render():
         k4.markdown(kpi("Mejor Posición", best_pos, "", "green"), unsafe_allow_html=True)
 
         st.markdown("<div class='sec-title'>Tabla de Posiciones</div>", unsafe_allow_html=True)
-        tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "P/E", "Valor", "P&L $", "P&L %"]].copy()
-        tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "P/E", "Valor ($)", "P&L ($)", "P&L %"]
+        
+        # Calculate Trade Health (0 to 1)
+        # 0 = SL, 1 = TP
+        def _calc_health(row):
+            p = row["Precio"]
+            sl = row["stop_loss"]
+            tp = row["take_profit"]
+            if pd.isna(p) or pd.isna(sl) or pd.isna(tp) or sl >= tp:
+                return None
+            if p <= sl: return 0.0
+            if p >= tp: return 1.0
+            return (p - sl) / (tp - sl)
+
+        df["Health"] = df.apply(_calc_health, axis=1)
+        
+        tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "stop_loss", "take_profit", "Health", "Valor", "P&L $", "P&L %"]].copy()
+        tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "SL", "TP", "Trade Health", "Valor ($)", "P&L ($)", "P&L %"]
 
         def clr(v):
             if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -231,9 +264,20 @@ def render():
         st.dataframe(
             tbl.style.map(clr, subset=["Cambio %", "P&L ($)", "P&L %"])
                      .format({"Costo Prom.": "${:.2f}", "Precio": "${:.2f}", "Cambio %": "{:+.2f}%",
+                              "SL": "${:.2f}", "TP": "${:.2f}",
                               "Valor ($)": "${:,.0f}", "P&L ($)": "${:+,.0f}", "P&L %": "{:+.2f}%", "Acciones": "{:.2f}"},
                               na_rep="—"),
-            use_container_width=True, hide_index=True
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Trade Health": st.column_config.ProgressColumn(
+                    "Estado Trade (SL→TP)",
+                    help="Posición del precio respecto al SL (0%) y TP (100%)",
+                    format="%.2f",
+                    min_value=0,
+                    max_value=1,
+                    width="medium"
+                )
+            }
         )
 
         # ── Charts ──
@@ -812,71 +856,81 @@ def render():
     # TAB 5: CALCULADORA DE POSICIÓN
     # ══════════════════════════════════════════════════════════════
     with tab_calc:
-        st.markdown("<div class='sec-title'>Calculadora de Tamaño de Posición</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sec-title'>🧮 Calculadora de Tamaño (Kelly Criterion)</div>", unsafe_allow_html=True)
         st.markdown("""
         <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
                     border-radius:12px;padding:16px;margin-bottom:20px;color:#94a3b8;font-size:13px;'>
-          Calcula cuántas acciones comprar basándote en tu nivel de riesgo.<br>
-          <strong>Regla de oro:</strong> Nunca arriesgar más del 1-2% del capital total por operación.
+          <b>Criterio de Kelly:</b> Determina matemáticamente el tamaño óptimo de la apuesta basándose en la ventaja estadística.<br>
+          <b>Regla de Kelly Fraccionario:</b> Se recomienda usar medio Kelly (0.5) para mayor estabilidad.
         </div>""", unsafe_allow_html=True)
 
-        pc1, pc2 = st.columns(2)
+        pc1, pc2 = st.columns([1, 1.2])
         with pc1:
+            st.markdown("##### ⚙️ Parámetros de Estrategia")
             capital = st.number_input("Capital total ($)", min_value=0.0, value=10000.0, step=1000.0)
-            risk_pct = st.number_input("Riesgo por operación (%)", min_value=0.1, max_value=10.0, value=2.0, step=0.5)
-            entry_price = st.number_input("Precio de entrada ($)", min_value=0.01, value=100.0, step=1.0)
-            stop_loss = st.number_input("Stop Loss ($)", min_value=0.01, value=95.0, step=1.0)
+            win_rate = st.slider("Tasa de Acierto (Win Rate %)", 10, 90, 55) / 100
+            profit_loss_ratio = st.number_input("Ratio Profit/Loss (Promedio)", min_value=0.1, value=2.0, step=0.1)
+            kelly_fraction = st.select_slider("Fracción de Kelly", options=[0.25, 0.5, 1.0], value=0.5, help="1.0 = Kelly Full, 0.5 = Medio Kelly (Recomendado)")
+            
+            st.markdown("---")
+            st.markdown("##### 🎯 Parámetros del Trade")
+            entry_p = st.number_input("Precio entrada ($)", min_value=0.01, value=150.0)
+            stop_p = st.number_input("Precio Stop Loss ($)", min_value=0.01, value=140.0)
 
         with pc2:
-            if entry_price > 0 and stop_loss > 0 and entry_price != stop_loss:
-                risk_amount = capital * (risk_pct / 100)
-                risk_per_share = abs(entry_price - stop_loss)
-                shares_to_buy = int(risk_amount / risk_per_share) if risk_per_share > 0 else 0
-                position_size = shares_to_buy * entry_price
-                position_pct = (position_size / capital * 100) if capital > 0 else 0
-
-                rr_ratios = [1.5, 2, 3]
-                tp_levels = [entry_price + (risk_per_share * rr) for rr in rr_ratios]
-
-                st.markdown(f"""
-                <div style='background:linear-gradient(135deg,#0d1f35,#0a1628);border:1px solid #1e3a5f;
-                            border-radius:14px;padding:24px;'>
-                  <div style='font-size:11px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;'>Resultado</div>
-                  <div style='display:flex;justify-content:space-between;margin-bottom:12px;'>
-                    <span style='color:#94a3b8;'>Riesgo máximo ($):</span>
-                    <span style='color:#f87171;font-weight:700;'>${risk_amount:,.2f}</span>
-                  </div>
-                  <div style='display:flex;justify-content:space-between;margin-bottom:12px;'>
-                    <span style='color:#94a3b8;'>Riesgo por acción ($):</span>
-                    <span style='color:#fbbf24;font-weight:600;'>${risk_per_share:.2f}</span>
-                  </div>
-                  <div style='display:flex;justify-content:space-between;margin-bottom:12px;border-top:1px solid #1e3a5f;padding-top:12px;'>
-                    <span style='color:#e2e8f0;font-weight:600;'>Acciones a comprar:</span>
-                    <span style='color:#60a5fa;font-weight:800;font-size:22px;'>{shares_to_buy}</span>
-                  </div>
-                  <div style='display:flex;justify-content:space-between;margin-bottom:12px;'>
-                    <span style='color:#94a3b8;'>Tamaño posición ($):</span>
-                    <span style='color:#a78bfa;font-weight:600;'>${position_size:,.2f}</span>
-                  </div>
-                  <div style='display:flex;justify-content:space-between;margin-bottom:16px;'>
-                    <span style='color:#94a3b8;'>% del capital:</span>
-                    <span style='color:#94a3b8;font-weight:600;'>{position_pct:.1f}%</span>
-                  </div>
-                  <div style='border-top:1px solid #1e3a5f;padding-top:12px;'>
-                    <div style='font-size:10px;color:#5a6f8a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;'>Take Profit Sugerido</div>
-                """, unsafe_allow_html=True)
-
-                for rr, tp in zip(rr_ratios, tp_levels):
-                    tp_pnl = (tp - entry_price) * shares_to_buy
-                    st.markdown(f"""
-                    <div style='display:flex;justify-content:space-between;margin-bottom:6px;'>
-                      <span style='color:#94a3b8;font-size:12px;'>R:R {rr}:1 → ${tp:.2f}</span>
-                      <span style='color:#34d399;font-size:12px;font-weight:600;'>+${tp_pnl:,.2f}</span>
-                    </div>""", unsafe_allow_html=True)
-
-                st.markdown("</div></div>", unsafe_allow_html=True)
-            else:
-                st.info("Ingresa precio de entrada y stop loss para calcular.")
+            # Kelly Formula: K% = W - [(1 - W) / R]
+            # W = win rate, R = profit/loss ratio
+            kelly_pct = win_rate - ((1 - win_rate) / profit_loss_ratio)
+            suggested_kelly = max(0, kelly_pct * kelly_fraction)
+            
+            risk_amount = capital * suggested_kelly
+            risk_per_share = abs(entry_p - stop_p)
+            shares_to_buy = int(risk_amount / risk_per_share) if risk_per_share > 0 else 0
+            position_value = shares_to_buy * entry_p
+            
+            # UI display
+            st.markdown(f"""
+            <div style='background:linear-gradient(135deg,#0d1f35,#0a1628);border:1px solid #1e3a5f;
+                        border-radius:14px;padding:24px;'>
+              <div style='color:#94a3b8;font-size:11px;text-transform:uppercase;margin-bottom:15px;'>Asignación Optimizada</div>
+              
+              <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;'>
+                 <span style='color:#e2e8f0;font-size:14px;'>Kelly Sugerido ({kelly_fraction}x):</span>
+                 <span style='color:#60a5fa;font-size:24px;font-weight:800;'>{suggested_kelly*100:.1f}%</span>
+              </div>
+              
+              <div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;'>
+                <div style='background:rgba(255,255,255,0.03);padding:15px;border-radius:10px;'>
+                   <div style='color:#94a3b8;font-size:10px;'>ACCIONES</div>
+                   <div style='color:#facc15;font-size:20px;font-weight:700;'>{shares_to_buy}</div>
+                </div>
+                <div style='background:rgba(255,255,255,0.03);padding:15px;border-radius:10px;'>
+                   <div style='color:#94a3b8;font-size:10px;'>VALOR POSICIÓN</div>
+                   <div style='color:#34d399;font-size:20px;font-weight:700;'>${position_value:,.0f}</div>
+                </div>
+              </div>
+              
+              <div style='margin-top:20px;padding:15px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.2);border-radius:10px;'>
+                <div style='color:#f87171;font-size:11px;'>RIESGO MÁXIMO EN $</div>
+                <div style='color:#f87171;font-size:18px;font-weight:700;'>${risk_amount:,.2f}</div>
+              </div>
+              
+              <div style='margin-top:15px;font-size:11px;color:#64748b;line-height:1.4;'>
+                ⚠️ <i>Nota: Si el Kelly es negativo, tu estrategia actual no tiene ventaja estadística (Edge) y no deberías operar.</i>
+              </div>
+            </div>""", unsafe_allow_html=True)
+            
+            # Interactive Chart for Kelly Curve
+            curve_data = []
+            for r in np.arange(0.5, 5.5, 0.5):
+                k = win_rate - ((1 - win_rate) / r)
+                curve_data.append({"Ratio R:R": r, "Kelly %": max(0, k * 100)})
+            
+            c_df = pd.DataFrame(curve_data)
+            fig_k = px.line(c_df, x="Ratio R:R", y="Kelly %", title="Curva de Sensibilidad Kelly vs R:R")
+            fig_k.add_vline(x=profit_loss_ratio, line_dash="dash", line_color="#fac415")
+            fig_k.update_layout(height=250, **dark_layout(margin=dict(t=30, b=0, l=0, r=0)))
+            st.plotly_chart(fig_k, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════
     # TAB 6: CORRELACIÓN
@@ -1313,6 +1367,86 @@ def render():
                                         "Contribución Riesgo (%)": [round(r, 2) for r in rc_pct],
                                     }).sort_values("Risk Parity (%)", ascending=False)
                                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+                                # ── PHASE 2: HRP INSTITUCIONAL (RISKFOLIO) ──
+                                if HAS_RISKFOLIO:
+                                    st.markdown("---")
+                                    st.markdown("<div class='sec-title'>📐 HRP Institucional (Hierarchical Risk Parity)</div>", unsafe_allow_html=True)
+                                    st.caption("Optimizador avanzado que utiliza clustering jerárquico para diversificar el riesgo basado en correlaciones.")
+                                    
+                                    try:
+                                        # Building the portfolio object
+                                        port = rp.Portfolio(returns=returns_rp)
+                                        
+                                        # Estimate method (sample or ledroit-wolf)
+                                        port.assets_stats(method_mu='hist', method_cov='hist', d=0.94)
+                                        
+                                        # Optimization parameters
+                                        model='HRP' # Hierarchical Risk Parity
+                                        codependence = 'pearson' # Codependence matrix
+                                        rm = 'MV' # Risk measure
+                                        rf = 0 # Risk free rate
+                                        linkage = 'ward' # Linkage method
+                                        max_k = 10 # Max clusters
+                                        leaf_order = True # Order leaves of dendrogram
+                                        
+                                        w_hrp = port.optimization(model=model, codependence=codependence,
+                                                                 rm=rm, rf=rf, linkage=linkage,
+                                                                 max_k=max_k, leaf_order=leaf_order)
+                                        
+                                        if w_hrp is not None:
+                                            # Weights display
+                                            hr_c1, hr_c2 = st.columns([1, 1])
+                                            
+                                            with hr_c1:
+                                                df_hrp = w_hrp.reset_index()
+                                                df_hrp.columns = ['Ticker', 'Peso']
+                                                df_hrp['Peso'] *= 100
+                                                
+                                                fig_h = px.pie(df_hrp, values='Peso', names='Ticker', 
+                                                              title="Distribucion Optima HRP",
+                                                              hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                                                fig_h.update_layout(**DARK, height=400)
+                                                st.plotly_chart(fig_h, use_container_width=True)
+                                            
+                                            with hr_c2:
+                                                # Metrics comparison
+                                                # port.returns is where Riskfolio stores returns
+                                                # HRP usually has lower volatility but potentially lower returns than MV
+                                                hrp_ret = (w_hrp.values.flatten() @ mu_rp) * 100
+                                                hrp_vol = np.sqrt(w_hrp.values.flatten() @ cov_matrix @ w_hrp.values.flatten()) * 100
+                                                hrp_sharpe = (hrp_ret - 2.0) / hrp_vol if hrp_vol > 0 else 0
+                                                
+                                                st.markdown("<br><br>", unsafe_allow_html=True)
+                                                st.markdown(f"""
+                                                <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:20px;'>
+                                                  <div style='color:#94a3b8;font-size:12px;margin-bottom:10px;'>METRICAS HRP</div>
+                                                  <div style='font-size:20px;font-weight:700;color:#60a5fa;'>Retorno: {hrp_ret:.2f}%</div>
+                                                  <div style='font-size:20px;font-weight:700;color:#f87171;'>Volatilidad: {hrp_vol:.2f}%</div>
+                                                  <div style='font-size:20px;font-weight:700;color:#34d399;'>Sharpe: {hrp_sharpe:.2f}</div>
+                                                </div>""", unsafe_allow_html=True)
+                                                
+                                                if st.button("Aplicar Pesos HRP al Rebalanceador"):
+                                                    for tk, weight in zip(df_hrp['Ticker'], df_hrp['Peso']):
+                                                        st.session_state[f"rebal_target_{tk}"] = round(weight, 2)
+                                                    st.success("Pesos cargados en la pestaña 'Rebalanceo'.")
+                                            
+                                            # Cluster Dendrogram
+                                            with st.expander("Ver Dendrograma de Clustering Jerarquico"):
+                                                fig_d, ax_d = plt.subplots(figsize=(10, 6))
+                                                rp.plot_dendrogram(returns=returns_rp,
+                                                                  codependence='pearson',
+                                                                  linkage='ward',
+                                                                  k=None,
+                                                                  max_k=10,
+                                                                  leaf_order=True,
+                                                                  ax=ax_d)
+                                                st.pyplot(fig_d)
+                                                
+                                    except Exception as e_h:
+                                        st.error(f"Error en calculo HRP: {e_h}")
+                                else:
+                                    st.info("Para HRP avanzado, por favor instale riskfolio-lib.")
         except Exception as e:
             st.error(f"Error en optimización de cartera: {e}")
 
@@ -1616,3 +1750,636 @@ def render():
                     st.plotly_chart(_fig_bar, use_container_width=True)
                 else:
                     st.warning(f"No se encontraron datos de {_metric_type}")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 12: STRESS TEST (MONTE CARLO)
+    # ══════════════════════════════════════════════════════════════
+    with tab_stress:
+        wl_stress = db.get_watchlist()
+        if wl_stress.empty:
+            st.info("Agrega tickers a tu watchlist primero.")
+        else:
+            st.markdown("<div class='sec-title'>🔥 Monte Carlo Stress Test</div>", unsafe_allow_html=True)
+            st.caption("Simulación de 1,000 caminos aleatorios correlacionados para proyectar el rango de valores del portafolio a 1 año.")
+
+            sc1, sc2, sc3 = st.columns(3)
+            n_sims = sc1.number_input("Simulaciones", value=1000, min_value=100, max_value=5000, step=100)
+            n_days = sc2.number_input("Días a proyectar", value=252, min_value=30, max_value=504, step=21)
+            hist_per = sc3.selectbox("Historial base", ["1y", "2y", "3y", "5y"], index=1)
+
+            if st.button("🚀 Ejecutar Simulación", type="primary", use_container_width=True, key="mc_run"):
+                with st.spinner("Ejecutando simulación Monte Carlo..."):
+                    from utils.monte_carlo import run_monte_carlo
+
+                    tickers_mc = wl_stress["ticker"].tolist()
+                    shares = wl_stress["shares"].tolist()
+                    costs = wl_stress["avg_cost"].tolist()
+
+                    # Get live prices for weights
+                    try:
+                        prices_mc = get_batch_prices(tuple(tickers_mc))
+                        values = [shares[i] * prices_mc.get(tickers_mc[i], costs[i]) for i in range(len(tickers_mc))]
+                    except Exception:
+                        values = [shares[i] * costs[i] for i in range(len(tickers_mc))]
+
+                    total_val_mc = sum(values)
+                    weights_mc = [v / total_val_mc for v in values] if total_val_mc > 0 else [1/len(tickers_mc)] * len(tickers_mc)
+
+                    result = run_monte_carlo(
+                        tickers_mc, weights_mc, total_val_mc,
+                        n_simulations=n_sims, n_days=n_days, history_period=hist_per
+                    )
+
+                if "error" in result:
+                    st.error(result["error"])
+                else:
+                    stats = result["stats"]
+
+                    # KPIs
+                    mk1, mk2, mk3, mk4 = st.columns(4)
+                    mk1.markdown(kpi("Valor Inicial", fmt(stats["initial_value"]), f"{stats['n_assets']} activos", "blue"), unsafe_allow_html=True)
+                    mk2.markdown(kpi("Valor Medio Final", fmt(stats["mean_final"]), f"{n_days} días", "green" if stats["mean_final"] > stats["initial_value"] else "red"), unsafe_allow_html=True)
+                    mk3.markdown(kpi("VaR 95%", f"${result['var_95']:+,.0f}", "pérdida máxima probable", "red"), unsafe_allow_html=True)
+                    mk4.markdown(kpi("Prob. de Pérdida", f"{stats['prob_loss_pct']:.1f}%", "en el horizonte", "red" if stats["prob_loss_pct"] > 50 else "green"), unsafe_allow_html=True)
+
+                    # Cone Chart
+                    days_range = list(range(n_days + 1))
+
+                    fig_mc = go.Figure()
+                    # 5-95 percentile band
+                    fig_mc.add_trace(go.Scatter(x=days_range, y=result["p95"], mode="lines", line=dict(width=0), showlegend=False))
+                    fig_mc.add_trace(go.Scatter(x=days_range, y=result["p5"], mode="lines", fill="tonexty", fillcolor="rgba(239,68,68,0.12)", line=dict(width=0), name="Rango 90%"))
+                    # 25-75 percentile band
+                    fig_mc.add_trace(go.Scatter(x=days_range, y=result["p75"], mode="lines", line=dict(width=0), showlegend=False))
+                    fig_mc.add_trace(go.Scatter(x=days_range, y=result["p25"], mode="lines", fill="tonexty", fillcolor="rgba(96,165,250,0.2)", line=dict(width=0), name="Rango 50%"))
+                    # Mean path
+                    fig_mc.add_trace(go.Scatter(x=days_range, y=result["mean_path"], mode="lines", line=dict(color="#34d399", width=2.5), name="Media"))
+                    # Initial value line
+                    fig_mc.add_hline(y=total_val_mc, line_dash="dot", line_color="#fbbf24", annotation_text=f"Valor Actual: {fmt(total_val_mc)}")
+
+                    fig_mc.update_layout(
+                        **DARK, height=500,
+                        title=dict(text=f"Proyección Monte Carlo ({n_sims} simulaciones, {n_days} días)", font=dict(color="#94a3b8", size=14), x=0.5),
+                        xaxis_title="Días", yaxis_title="Valor del Portafolio ($)",
+                        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8"))
+                    )
+                    st.plotly_chart(fig_mc, use_container_width=True)
+
+                    # Distribution histogram
+                    fig_dist = go.Figure()
+                    fig_dist.add_trace(go.Histogram(
+                        x=result["final_values"], nbinsx=60,
+                        marker_color="rgba(96,165,250,0.6)", marker_line=dict(color="#60a5fa", width=0.5)
+                    ))
+                    fig_dist.add_vline(x=total_val_mc, line_dash="dash", line_color="#fbbf24", annotation_text="Valor Actual")
+                    fig_dist.add_vline(x=total_val_mc + result["var_95"], line_dash="dash", line_color="#f87171", annotation_text=f"VaR 95%: {fmt(total_val_mc + result['var_95'])}")
+                    fig_dist.update_layout(**DARK, height=350, title=dict(text="Distribución de Valores Finales", font=dict(color="#94a3b8", size=13), x=0.5),
+                                           xaxis_title="Valor Final ($)", yaxis_title="Frecuencia")
+                    st.plotly_chart(fig_dist, use_container_width=True)
+
+                    st.markdown(f"""
+                    <div style='background:rgba(239,68,68,0.1);border:1px solid #f87171;padding:15px;border-radius:10px;'>
+                        <b style='color:#f87171;'>⚠️ Resumen de Riesgo</b><br>
+                        <span style='color:#94a3b8;'>VaR 95%:</span> <b>${result['var_95']:+,.0f}</b> |
+                        <span style='color:#94a3b8;'>CVaR 95%:</span> <b>${result['cvar_95']:+,.0f}</b> |
+                        <span style='color:#94a3b8;'>Peor caso:</span> <b>{fmt(stats['worst_case'])}</b> |
+                        <span style='color:#94a3b8;'>Mejor caso:</span> <b>{fmt(stats['best_case'])}</b>
+                    </div>""", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 13: VOLUME PROFILE
+    # ══════════════════════════════════════════════════════════════
+    with tab_volprof:
+        wl_vp = db.get_watchlist()
+        if wl_vp.empty:
+            st.info("Agrega tickers a tu watchlist primero.")
+        else:
+            st.markdown("<div class='sec-title'>📊 Perfil de Volumen</div>", unsafe_allow_html=True)
+            st.caption("Distribución de volumen por niveles de precio. Identifica POC, zonas de alta liquidez (HVN) y vacíos (LVN).")
+
+            vc1, vc2, vc3, vc4 = st.columns(4)
+            vp_ticker = vc1.selectbox("Ticker", wl_vp["ticker"].tolist(), key="vp_tick")
+            vp_interval = vc2.selectbox("Intervalo", ["1h", "4h", "1d"], index=1, key="vp_int")
+            vp_period = vc3.selectbox("Período", ["5d", "1mo", "3mo", "6mo"], index=1, key="vp_per")
+            vp_bins = vc4.number_input("Niveles", value=50, min_value=20, max_value=100, step=5, key="vp_bins")
+
+            if st.button("Calcular Perfil de Volumen", type="primary", use_container_width=True, key="vp_run"):
+                with st.spinner("Calculando perfil de volumen..."):
+                    from utils.volume_profile import compute_volume_profile
+                    vp_result = compute_volume_profile(vp_ticker, interval=vp_interval, period=vp_period, n_bins=vp_bins)
+
+                if "error" in vp_result:
+                    st.error(vp_result["error"])
+                else:
+                    profile = vp_result["profile"]
+                    poc = vp_result["poc_price"]
+                    va_high = vp_result["value_area_high"]
+                    va_low = vp_result["value_area_low"]
+
+                    vk1, vk2, vk3 = st.columns(3)
+                    vk1.markdown(kpi("POC (Point of Control)", f"${poc:,.2f}", "máximo volumen", "blue"), unsafe_allow_html=True)
+                    vk2.markdown(kpi("Value Area High", f"${va_high:,.2f}", "70% vol superior", "green"), unsafe_allow_html=True)
+                    vk3.markdown(kpi("Value Area Low", f"${va_low:,.2f}", "70% vol inferior", "red"), unsafe_allow_html=True)
+
+                    # Horizontal bar chart
+                    colors = []
+                    for _, row in profile.iterrows():
+                        if row["node_type"] == "POC":
+                            colors.append("#fbbf24")
+                        elif row["node_type"] == "HVN":
+                            colors.append("#60a5fa")
+                        elif row["node_type"] == "LVN":
+                            colors.append("rgba(96,165,250,0.2)")
+                        else:
+                            colors.append("rgba(96,165,250,0.5)")
+
+                    fig_vp = go.Figure()
+                    fig_vp.add_trace(go.Bar(
+                        y=profile["price_level"], x=profile["volume"],
+                        orientation="h", marker_color=colors,
+                        hovertemplate="Precio: $%{y:.2f}<br>Volumen: %{x:,.0f}<extra></extra>"
+                    ))
+
+                    # POC line
+                    fig_vp.add_hline(y=poc, line_dash="solid", line_color="#fbbf24", line_width=2,
+                                    annotation_text=f"POC: ${poc:.2f}", annotation_font_color="#fbbf24")
+                    # Value Area
+                    fig_vp.add_hrect(y0=va_low, y1=va_high, fillcolor="rgba(96,165,250,0.08)", line_width=0,
+                                    annotation_text="Value Area (70%)", annotation_font_color="#60a5fa")
+
+                    fig_vp.update_layout(
+                        **DARK, height=600,
+                        title=dict(text=f"Volume Profile — {vp_ticker} ({vp_interval} / {vp_period})", font=dict(color="#94a3b8", size=14), x=0.5),
+                        xaxis_title="Volumen", yaxis_title="Precio ($)",
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_vp, use_container_width=True)
+
+                    # Leyenda
+                    st.markdown("""
+                    <div style='display:flex;gap:20px;justify-content:center;'>
+                        <span>🟡 <b>POC</b> (Precio de Control)</span>
+                        <span>🔵 <b>HVN</b> (Alta Liquidez)</span>
+                        <span>⚪ <b>LVN</b> (Vacío de Volumen)</span>
+                    </div>""", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 14: OPTIONS FLOW
+    # ══════════════════════════════════════════════════════════════
+    with tab_optflow:
+        wl_opt = db.get_watchlist()
+        if wl_opt.empty:
+            st.info("Agrega tickers a tu watchlist primero.")
+        else:
+            st.markdown("<div class='sec-title'>🕵️ Escáner de Opciones Inusuales</div>", unsafe_allow_html=True)
+            st.caption("Detecta actividad inusual en cadenas de opciones (Volume >> Open Interest) que puede indicar posicionamiento institucional.")
+
+            oc1, oc2 = st.columns(2)
+            opt_n = oc1.number_input("Top N Tickers a escanear", value=5, min_value=1, max_value=10, step=1)
+            opt_threshold = oc2.number_input("Umbral Vol/OI", value=2.0, min_value=1.0, max_value=10.0, step=0.5)
+
+            if st.button("🔍 Escanear Opciones", type="primary", use_container_width=True, key="opt_scan"):
+                with st.spinner(f"Escaneando cadenas de opciones para los top {opt_n} tickers..."):
+                    from utils.options_scanner import scan_unusual_options, get_options_sentiment
+                    opt_tickers = wl_opt["ticker"].tolist()
+                    opt_df = scan_unusual_options(opt_tickers, max_tickers=opt_n, vol_oi_threshold=opt_threshold)
+                    sentiment = get_options_sentiment(opt_df)
+
+                if opt_df.empty:
+                    st.info("No se encontraron anomalías con los filtros actuales. Intenta reducir el umbral Vol/OI.")
+                else:
+                    # Sentiment KPIs
+                    ok1, ok2, ok3, ok4 = st.columns(4)
+                    ok1.markdown(kpi("Señal", sentiment["signal"], "", "blue"), unsafe_allow_html=True)
+                    ok2.markdown(kpi("Calls Inusuales", str(sentiment["call_count"]), f"Vol: {sentiment.get('call_volume', 0):,}", "green"), unsafe_allow_html=True)
+                    ok3.markdown(kpi("Puts Inusuales", str(sentiment["put_count"]), f"Vol: {sentiment.get('put_volume', 0):,}", "red"), unsafe_allow_html=True)
+                    ok4.markdown(kpi("Ratio Call/Put", f"{sentiment['ratio']:.2f}", "Vol. ponderado", "blue"), unsafe_allow_html=True)
+
+                    st.markdown("<div class='sec-title'>Anomalías Detectadas (ordenadas por urgencia)</div>", unsafe_allow_html=True)
+
+                    def _opt_color(val):
+                        if isinstance(val, str) and "CALL" in val:
+                            return "color:#34d399"
+                        if isinstance(val, str) and "PUT" in val:
+                            return "color:#f87171"
+                        return ""
+
+                    st.dataframe(
+                        opt_df.style.map(_opt_color, subset=["Tipo"]).format({
+                            "Strike": "${:.2f}", "Last Price": "${:.2f}",
+                            "Volume": "{:,}", "Open Interest": "{:,}",
+                            "IV": "{:.1f}%", "Vol/OI": "{:.1f}x",
+                            "Bid": "${:.2f}", "Ask": "${:.2f}"
+                        }),
+                        use_container_width=True, hide_index=True, height=400
+                    )
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 15: MARKET BREADTH
+    # ══════════════════════════════════════════════════════════════
+    with tab_breadth:
+        st.markdown("<div class='sec-title'>📡 Market Breadth Dashboard</div>", unsafe_allow_html=True)
+        st.caption("Salud real del mercado: % de acciones del S&P 500 por encima de su SMA-50 y SMA-200. Una divergencia (índice sube, breadth cae) es señal de techo institucional.")
+
+        sample_n = st.slider("Muestra de tickers a analizar", 50, 300, 100, step=50, key="breadth_n")
+        if st.button("📡 Calcular Market Breadth", type="primary", use_container_width=True, key="breadth_run"):
+            with st.spinner("Descargando datos del mercado..."):
+                from utils.market_breadth import compute_market_breadth
+                breadth = compute_market_breadth(sample_size=sample_n)
+
+            if "error" in breadth:
+                st.error(breadth["error"])
+            else:
+                bk1, bk2, bk3, bk4 = st.columns(4)
+                col50  = "#34d399" if breadth["pct_above_50"] >= 60 else ("#fbbf24" if breadth["pct_above_50"] >= 40 else "#f87171")
+                col200 = "#34d399" if breadth["pct_above_200"] >= 60 else ("#fbbf24" if breadth["pct_above_200"] >= 40 else "#f87171")
+                bk1.markdown(kpi("% sobre SMA-50",  f"{breadth['pct_above_50']}%",  breadth["signal_50"],  "blue"), unsafe_allow_html=True)
+                bk2.markdown(kpi("% sobre SMA-200", f"{breadth['pct_above_200']}%", breadth["signal_200"], "blue"), unsafe_allow_html=True)
+                bk3.markdown(kpi("Tickers analizados", str(breadth["total_analyzed"]), "muestra S&P 500", "blue"), unsafe_allow_html=True)
+                bk4.markdown(kpi("Sobre SMA-200", f"{breadth['above_200']}/{breadth['total_analyzed']}", "activos", "green"), unsafe_allow_html=True)
+
+                # Gauge chart (SMA-50)
+                fig_b50 = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=breadth["pct_above_50"],
+                    number={"suffix": "%", "font": {"color": col50, "size": 40}},
+                    title={"text": "% Acciones sobre SMA-50", "font": {"color": "#94a3b8", "size": 13}},
+                    gauge={
+                        "axis": {"range": [0, 100], "dtick": 25},
+                        "bar": {"color": col50},
+                        "bgcolor": "#0a0a0a",
+                        "steps": [
+                            {"range": [0, 30],  "color": "rgba(239,68,68,0.15)"},
+                            {"range": [30, 50], "color": "rgba(251,191,36,0.1)"},
+                            {"range": [50, 70], "color": "rgba(148,163,184,0.08)"},
+                            {"range": [70, 100],"color": "rgba(52,211,153,0.15)"},
+                        ],
+                    }
+                ))
+                fig_b50.update_layout(**DARK, height=280)
+
+                fig_b200 = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=breadth["pct_above_200"],
+                    number={"suffix": "%", "font": {"color": col200, "size": 40}},
+                    title={"text": "% Acciones sobre SMA-200", "font": {"color": "#94a3b8", "size": 13}},
+                    gauge={
+                        "axis": {"range": [0, 100], "dtick": 25},
+                        "bar": {"color": col200},
+                        "bgcolor": "#0a0a0a",
+                        "steps": [
+                            {"range": [0, 30],  "color": "rgba(239,68,68,0.15)"},
+                            {"range": [30, 50], "color": "rgba(251,191,36,0.1)"},
+                            {"range": [50, 70], "color": "rgba(148,163,184,0.08)"},
+                            {"range": [70, 100],"color": "rgba(52,211,153,0.15)"},
+                        ],
+                    }
+                ))
+                fig_b200.update_layout(**DARK, height=280)
+
+                gc1, gc2 = st.columns(2)
+                gc1.plotly_chart(fig_b50,  use_container_width=True)
+                gc2.plotly_chart(fig_b200, use_container_width=True)
+
+                # Historical breadth lines
+                if breadth.get("hist_50") is not None and len(breadth["hist_50"]) > 0:
+                    fig_hist = go.Figure()
+                    hist50  = breadth["hist_50"].dropna()
+                    hist200 = breadth["hist_200"].dropna() if breadth.get("hist_200") is not None else None
+                    fig_hist.add_trace(go.Scatter(x=hist50.index, y=hist50.values, mode="lines",
+                                                  line=dict(color="#60a5fa", width=2), name="% sobre SMA-50"))
+                    if hist200 is not None and len(hist200) > 0:
+                        fig_hist.add_trace(go.Scatter(x=hist200.index, y=hist200.values, mode="lines",
+                                                      line=dict(color="#34d399", width=2), name="% sobre SMA-200"))
+                    fig_hist.add_hline(y=50, line_dash="dot", line_color="#fbbf24", annotation_text="50%")
+                    fig_hist.update_layout(**DARK, height=300,
+                                           title=dict(text="Breadth Histórico (Semanal)", font=dict(color="#94a3b8", size=13), x=0.5),
+                                           xaxis_title="Fecha")
+                    fig_hist.update_yaxes(title_text="%", range=[0, 100])
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+                # Sector heatmap
+                if breadth.get("sectors"):
+                    sec_data = breadth["sectors"]
+                    sec_df = pd.DataFrame([
+                        {"Sector": name,
+                         "ETF": d["etf"],
+                         "Precio": f"${d['price']:.2f}",
+                         "Sobre SMA-50": "✅" if d["above_50"] else "❌",
+                         "Sobre SMA-200": "✅" if d["above_200"] else "❌"}
+                        for name, d in sec_data.items()
+                    ])
+                    st.markdown("<div class='sec-title' style='font-size:13px;'>Desglose por Sector (ETFs)</div>", unsafe_allow_html=True)
+                    st.dataframe(sec_df, use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 16: MAX PAIN
+    # ══════════════════════════════════════════════════════════════
+    with tab_maxpain:
+        wl_mp = db.get_watchlist()
+        st.markdown("<div class='sec-title'>⚡ Calculadora de Max Pain</div>", unsafe_allow_html=True)
+        st.caption("El nivel de precio donde el mayor número de opciones expira sin valor. Los Market Makers suelen anclar el precio aquí durante las semanas de vencimiento.")
+
+        mp1, mp2 = st.columns(2)
+        mp_ticker = mp1.text_input("Ticker", value=wl_mp["ticker"].iloc[0] if not wl_mp.empty else "SPY", key="mp_ticker")
+        from utils.max_pain import get_expirations
+        expirations = get_expirations(mp_ticker) if mp_ticker else []
+        mp_exp = mp2.selectbox("Expiración", expirations if expirations else ["Sin datos"], key="mp_exp")
+
+        if st.button("⚡ Calcular Max Pain", type="primary", use_container_width=True, key="mp_run"):
+            if not expirations:
+                st.error("No hay fechas de expiración disponibles para este ticker.")
+            else:
+                with st.spinner("Calculando Max Pain..."):
+                    from utils.max_pain import get_max_pain
+                    mp_result = get_max_pain(mp_ticker, mp_exp)
+
+                if "error" in mp_result:
+                    st.error(mp_result["error"])
+                else:
+                    mpk1, mpk2, mpk3 = st.columns(3)
+                    mpk1.markdown(kpi("Max Pain", f"${mp_result['max_pain_price']:.2f}", "precio de máximo dolor", "blue"), unsafe_allow_html=True)
+                    if mp_result.get("current_price"):
+                        mpk2.markdown(kpi("Precio Actual", f"${mp_result['current_price']:.2f}", "precio de mercado", "green"), unsafe_allow_html=True)
+                        dist = mp_result.get("distance_pct", 0)
+                        dist_color = "red" if abs(dist) > 3 else "green"
+                        mpk3.markdown(kpi("Distancia", f"{dist:+.1f}%", "del Max Pain", dist_color), unsafe_allow_html=True)
+
+                    # OI por strike (call/put)
+                    fig_mp = go.Figure()
+                    strikes = mp_result["strikes"]
+                    fig_mp.add_trace(go.Bar(
+                        x=strikes, y=mp_result["call_oi"],
+                        name="Call OI", marker_color="rgba(52,211,153,0.7)"
+                    ))
+                    fig_mp.add_trace(go.Bar(
+                        x=strikes, y=[-v for v in mp_result["put_oi"]],
+                        name="Put OI", marker_color="rgba(248,113,113,0.7)"
+                    ))
+                    fig_mp.add_vline(x=mp_result["max_pain_price"], line_dash="solid",
+                                     line_color="#fbbf24", line_width=2,
+                                     annotation_text=f"Max Pain: ${mp_result['max_pain_price']:.2f}",
+                                     annotation_font_color="#fbbf24")
+                    if mp_result.get("current_price"):
+                        fig_mp.add_vline(x=mp_result["current_price"], line_dash="dash",
+                                         line_color="#60a5fa",
+                                         annotation_text=f"Actual: ${mp_result['current_price']:.2f}",
+                                         annotation_font_color="#60a5fa")
+                    fig_mp.update_layout(
+                        **DARK, barmode="overlay", height=450,
+                        title=dict(text=f"Open Interest por Strike — {mp_ticker} [{mp_exp}]",
+                                   font=dict(color="#94a3b8", size=14), x=0.5),
+                        xaxis_title="Strike Price", yaxis_title="Open Interest (Calls + / Puts -)",
+                        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8"))
+                    )
+                    st.plotly_chart(fig_mp, use_container_width=True)
+
+                    # Pain curve
+                    fig_pain = go.Figure()
+                    fig_pain.add_trace(go.Scatter(
+                        x=strikes, y=mp_result["total_pain"],
+                        mode="lines+markers", line=dict(color="#f87171", width=2.5),
+                        fill="tozeroy", fillcolor="rgba(248,113,113,0.08)"
+                    ))
+                    fig_pain.add_vline(x=mp_result["max_pain_price"], line_dash="dash",
+                                       line_color="#fbbf24",
+                                       annotation_text=f"Mínimo: ${mp_result['max_pain_price']:.2f}",
+                                       annotation_font_color="#fbbf24")
+                    fig_pain.update_layout(**DARK, height=300,
+                                           title=dict(text="Curva de Dolor Total (menor = Max Pain)",
+                                                       font=dict(color="#94a3b8", size=13), x=0.5),
+                                           xaxis_title="Strike", yaxis_title="Dolor Total ($)")
+                    st.plotly_chart(fig_pain, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 17: SHORT SQUEEZE RADAR
+    # ══════════════════════════════════════════════════════════════
+    with tab_squeeze:
+        wl_sq = db.get_watchlist()
+        st.markdown("<div class='sec-title'>🔀 Radar de Short Squeeze</div>", unsafe_allow_html=True)
+        st.caption("Identifica acciones con alto interés en corto que pueden dispararse violentamente con volumen de compra sostenido.")
+
+        if wl_sq.empty:
+            st.info("Agrega tickers a tu watchlist primero.")
+        else:
+            if st.button("🔍 Escanear Short Interest", type="primary", use_container_width=True, key="sq_run"):
+                with st.spinner("Analizando short interest de todos los tickers..."):
+                    from utils.short_squeeze import scan_short_squeeze
+                    sq_df = scan_short_squeeze(wl_sq["ticker"].tolist())
+
+                if sq_df.empty:
+                    st.info("No se obtuvieron datos de short interest. Yahoo Finance puede no tener datos para estos tickers.")
+                else:
+                    # Top candidates
+                    top = sq_df.iloc[0] if len(sq_df) > 0 else None
+                    if top is not None:
+                        sqk1, sqk2, sqk3, sqk4 = st.columns(4)
+                        sqk1.markdown(kpi("Top Candidato", top["ticker"], top["risk_label"], "red"), unsafe_allow_html=True)
+                        sqk2.markdown(kpi("Short Float",
+                                          f"{top['short_pct_float']}%" if top['short_pct_float'] else "N/A",
+                                          "% del float en corto", "red"), unsafe_allow_html=True)
+                        sqk3.markdown(kpi("Days to Cover",
+                                          f"{top['short_ratio']} días" if top['short_ratio'] else "N/A",
+                                          "días para cubrir cortos", "red"), unsafe_allow_html=True)
+                        sqk4.markdown(kpi("Squeeze Score", f"{top['squeeze_score']}/100",
+                                          "presión acumulada", "red"), unsafe_allow_html=True)
+
+                    # Squeeze Score bar chart
+                    fig_sq = go.Figure()
+                    colors_sq = ["#f87171" if s >= 60 else ("#fbbf24" if s >= 35 else "#60a5fa")
+                                 for s in sq_df["squeeze_score"]]
+                    fig_sq.add_trace(go.Bar(
+                        x=sq_df["ticker"], y=sq_df["squeeze_score"],
+                        marker_color=colors_sq,
+                        text=sq_df["risk_label"], textposition="outside",
+                        hovertemplate="<b>%{x}</b><br>Score: %{y}<br>%{text}<extra></extra>"
+                    ))
+                    fig_sq.add_hline(y=50, line_dash="dot", line_color="#fbbf24",
+                                     annotation_text="Umbral de Alerta")
+                    fig_sq.update_layout(**DARK, height=400,
+                                         title=dict(text="Short Squeeze Score por Ticker",
+                                                     font=dict(color="#94a3b8", size=14), x=0.5),
+                                         xaxis_title="Ticker", yaxis_title="Squeeze Score (0-100)",
+                                         yaxis=dict(range=[0, 105]))
+                    st.plotly_chart(fig_sq, use_container_width=True)
+
+                    # Table
+                    display_sq = sq_df[["ticker", "squeeze_score", "risk_label", "short_pct_float",
+                                        "short_ratio", "price"]].copy()
+                    display_sq.columns = ["Ticker", "Score", "Riesgo", "Short Float (%)",
+                                          "Days to Cover", "Precio"]
+
+                    def _sq_color(val):
+                        if isinstance(val, (int, float)) and val >= 60:
+                            return "color: #f87171; font-weight: bold"
+                        return ""
+
+                    st.dataframe(
+                        display_sq.style.map(_sq_color, subset=["Score"]),
+                        use_container_width=True, hide_index=True
+                    )
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 18: ESTACIONALIDAD HISTÓRICA
+    # ══════════════════════════════════════════════════════════════
+    with tab_seasonal:
+        wl_sea = db.get_watchlist()
+        st.markdown("<div class='sec-title'>📅 Estacionalidad Histórica</div>", unsafe_allow_html=True)
+        st.caption("Patrón estadístico de retornos por mes, día de semana y trimestre. Identifica ventanas de sesgo alcista/bajista recurrente.")
+
+        sc1, sc2, sc3 = st.columns(3)
+        sea_ticker = sc1.selectbox("Ticker", wl_sea["ticker"].tolist() if not wl_sea.empty else ["SPY"],
+                                   key="sea_tick")
+        sea_years = sc2.number_input("Años de historia", value=10, min_value=3, max_value=25, step=1, key="sea_years")
+        _ = sc3  # spacer
+
+        if st.button("📅 Calcular Estacionalidad", type="primary", use_container_width=True, key="sea_run"):
+            with st.spinner(f"Calculando estacionalidad de {sea_ticker} ({sea_years} años)..."):
+                from utils.seasonality import compute_seasonality
+                sea_result = compute_seasonality(sea_ticker, years=sea_years)
+
+            if "error" in sea_result:
+                st.error(sea_result["error"])
+            else:
+                sek1, sek2 = st.columns(2)
+                sek1.markdown(kpi("Mejor Mes", sea_result["best_month"], "retorno promedio más alto", "green"), unsafe_allow_html=True)
+                sek2.markdown(kpi("Peor Mes", sea_result["worst_month"], "retorno promedio más bajo", "red"), unsafe_allow_html=True)
+
+                # Monthly heatmap bar chart
+                monthly = sea_result["monthly"]
+                bar_colors = ["#34d399" if r >= 0 else "#f87171" for r in monthly["Retorno Promedio (%)"]]
+                fig_month = go.Figure()
+                fig_month.add_trace(go.Bar(
+                    x=monthly["Mes"], y=monthly["Retorno Promedio (%)"],
+                    marker_color=bar_colors,
+                    text=[f"{v:+.1f}%" for v in monthly["Retorno Promedio (%)"]],
+                    textposition="outside",
+                    hovertemplate="<b>%{x}</b><br>Retorno: %{y:.2f}%<br>Win Rate: %{customdata:.1f}%<extra></extra>",
+                    customdata=monthly["Win Rate (%)"]
+                ))
+                fig_month.add_hline(y=0, line_dash="solid", line_color="#475569")
+                fig_month.update_layout(**DARK, height=380,
+                                         title=dict(text=f"Retorno Promedio Mensual — {sea_ticker} ({sea_years}a)",
+                                                     font=dict(color="#94a3b8", size=14), x=0.5),
+                                         xaxis_title="Mes", yaxis_title="Retorno Promedio (%)")
+                st.plotly_chart(fig_month, use_container_width=True)
+
+                # Win rate heatmap
+                fig_wr = go.Figure(go.Heatmap(
+                    z=[monthly["Win Rate (%)"].tolist()],
+                    x=monthly["Mes"].tolist(),
+                    y=["Win Rate"],
+                    colorscale=[[0, "#f87171"], [0.5, "#fbbf24"], [1, "#34d399"]],
+                    zmin=0, zmax=100,
+                    text=[[f"{v:.0f}%" for v in monthly["Win Rate (%)"]]],
+                    texttemplate="%{text}",
+                    hovertemplate="Mes: %{x}<br>Win Rate: %{z:.1f}%<extra></extra>",
+                    colorbar=dict(title="Win Rate %", tickfont=dict(color="#94a3b8"), titlefont=dict(color="#94a3b8"))
+                ))
+                fig_wr.update_layout(**DARK, height=140,
+                                      title=dict(text="Win Rate Mensual (%)", font=dict(color="#94a3b8", size=13), x=0.5))
+                st.plotly_chart(fig_wr, use_container_width=True)
+
+                # Day of week
+                weekly = sea_result["weekly"]
+                dw_colors = ["#34d399" if r >= 0 else "#f87171" for r in weekly["Retorno Promedio (%)"]]
+                fig_dw = go.Figure(go.Bar(
+                    x=weekly["Día"], y=weekly["Retorno Promedio (%)"],
+                    marker_color=dw_colors,
+                    text=[f"{v:+.3f}%" for v in weekly["Retorno Promedio (%)"]],
+                    textposition="outside"
+                ))
+                fig_dw.add_hline(y=0, line_dash="solid", line_color="#475569")
+                fig_dw.update_layout(**DARK, height=320,
+                                      title=dict(text="Retorno Promedio por Día de Semana",
+                                                  font=dict(color="#94a3b8", size=13), x=0.5),
+                                      xaxis_title="Día", yaxis_title="Retorno Diario Promedio (%)")
+                st.plotly_chart(fig_dw, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 19: PAIRS TRADING
+    # ══════════════════════════════════════════════════════════════
+    with tab_pairs:
+        wl_pt = db.get_watchlist()
+        st.markdown("<div class='sec-title'>🔗 Pairs Trading — Arbitraje Estadístico</div>", unsafe_allow_html=True)
+        st.caption("Test de cointegración de Engle-Granger para identificar pares de activos con correlación mean-reverting y generar señales de spread.")
+
+        if wl_pt.empty or len(wl_pt) < 2:
+            st.info("Necesitas al menos 2 tickers en tu watchlist para el análisis de pares.")
+        else:
+            pt_period = st.selectbox("Período de análisis", ["6mo", "1y", "2y"], index=1, key="pt_period")
+
+            if st.button("🔬 Escanear Pares Cointegrados", type="primary", use_container_width=True, key="pt_run"):
+                with st.spinner("Ejecutando test de cointegración..."):
+                    from utils.pairs_trading import compute_pairs_analysis
+                    pt_result = compute_pairs_analysis(wl_pt["ticker"].tolist(), period=pt_period)
+
+                if "error" in pt_result:
+                    st.error(pt_result["error"])
+                else:
+                    pairs_df = pt_result["pairs"]
+                    coint_list = pt_result["cointegrated"]
+
+                    ptk1, ptk2 = st.columns(2)
+                    ptk1.markdown(kpi("Pares analizados", str(len(pairs_df)), "combinaciones", "blue"), unsafe_allow_html=True)
+                    ptk2.markdown(kpi("Cointegrados (p<0.05)", str(len(coint_list)), "pares estadísticos", "green"), unsafe_allow_html=True)
+
+                    def _coint_color(val):
+                        if val == "✅": return "color: #34d399"
+                        if val == "❌": return "color: #f87171"
+                        return ""
+
+                    st.dataframe(
+                        pairs_df.style.map(_coint_color, subset=["Cointegrado"]).format({"P-Value": "{:.4f}"}),
+                        use_container_width=True, hide_index=True, height=300
+                    )
+
+                    # Allow spread drill-down for cointegrated pairs
+                    if coint_list:
+                        st.markdown("---")
+                        st.markdown("**Análisis de Spread para un par cointegrado:**")
+                        pair_options = [f"{t1} / {t2}" for t1, t2 in coint_list]
+                        selected_pair = st.selectbox("Seleccionar par", pair_options, key="pt_pair_sel")
+                        t1, t2 = [x.strip() for x in selected_pair.split("/")]
+
+                        if st.button(f"📊 Ver Spread: {t1} / {t2}", key="pt_spread_run"):
+                            with st.spinner("Calculando spread y Z-score..."):
+                                from utils.pairs_trading import get_spread_analysis
+                                spread_result = get_spread_analysis(t1, t2, period=pt_period)
+
+                            if "error" in spread_result:
+                                st.error(spread_result["error"])
+                            else:
+                                st.markdown(f"<div style='background:rgba(96,165,250,0.1);border:1px solid #60a5fa;"
+                                            f"padding:12px;border-radius:8px;text-align:center;font-size:16px;'>"
+                                            f"<b>Señal Actual:</b> {spread_result['signal']}</div>",
+                                            unsafe_allow_html=True)
+
+                                fig_spread = go.Figure()
+                                spread = spread_result["spread"]
+                                fig_spread.add_trace(go.Scatter(x=spread.index, y=spread.values,
+                                                                mode="lines", line=dict(color="#60a5fa", width=1.5),
+                                                                name="Spread"))
+                                fig_spread.add_hline(y=spread.mean(), line_dash="dash", line_color="#fbbf24",
+                                                     annotation_text="Media")
+                                fig_spread.update_layout(**DARK, height=280,
+                                                         title=dict(text=f"Spread: {t1} - {spread_result['hedge_ratio']:.2f}×{t2}",
+                                                                     font=dict(color="#94a3b8", size=13), x=0.5))
+                                st.plotly_chart(fig_spread, use_container_width=True)
+
+                                zscore = spread_result["z_score"].dropna()
+                                fig_z = go.Figure()
+                                fig_z.add_trace(go.Scatter(x=zscore.index, y=zscore.values,
+                                                           mode="lines", line=dict(color="#a78bfa", width=1.5),
+                                                           name="Z-Score", fill="tozeroy",
+                                                           fillcolor="rgba(167,139,250,0.08)"))
+                                fig_z.add_hline(y=2,  line_dash="dot", line_color="#f87171",
+                                                annotation_text="Short Signal (+2σ)")
+                                fig_z.add_hline(y=-2, line_dash="dot", line_color="#34d399",
+                                                annotation_text="Long Signal (-2σ)")
+                                fig_z.add_hline(y=0,  line_dash="solid", line_color="#475569")
+                                fig_z.update_layout(**DARK, height=280,
+                                                    title=dict(text="Z-Score del Spread (±2σ = señal)",
+                                                                font=dict(color="#94a3b8", size=13), x=0.5),
+                                                    yaxis_title="Z-Score")
+                                st.plotly_chart(fig_z, use_container_width=True)

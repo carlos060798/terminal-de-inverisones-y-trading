@@ -1,11 +1,8 @@
-"""
-database.py - SQLite setup and all CRUD operations
-Investment Command Center — Quantum Retail Terminal
-"""
 import sqlite3
 import json
 import pandas as pd
 import os
+from models import init_models, SessionLocal, engine
 
 # Use /tmp for writable DB in containerized environments (HF Spaces, Docker)
 _app_dir = os.path.dirname(__file__)
@@ -17,77 +14,50 @@ elif os.access(_app_dir, os.W_OK):
 else:
     DB_PATH = os.path.join("/tmp", "investment_data.db")
 
-
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def get_session():
+    """Returns a new SQLAlchemy database session."""
+    return SessionLocal()
 
 def init_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist (using SQLAlchemy and raw SQL migrations)."""
+    # Create tables via SQLAlchemy metadata
+    init_models()
+    
+    # Optional: Keep raw migrations for legacy fields if needed
     conn = get_connection()
     c = conn.cursor()
+    
+    # Migrations for existing DB if using raw SQL
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN notes TEXT DEFAULT ''")
+    except: pass
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN stop_loss REAL")
+    except: pass
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN take_profit REAL")
+    except: pass
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN list_name TEXT DEFAULT 'Principal'")
+    except: pass
+    try:
+        c.execute("ALTER TABLE price_alerts ADD COLUMN session TEXT DEFAULT 'Any'")
+    except: pass
 
-    # --- Watchlist / Portfolio ---
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS watchlist (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker      TEXT NOT NULL UNIQUE,
-            shares      REAL DEFAULT 0,
-            avg_cost    REAL DEFAULT 0,
-            sector      TEXT DEFAULT '',
-            notes       TEXT DEFAULT '',
-            added_at    TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # --- Trading Journal ---
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_date      TEXT NOT NULL,
-            ticker          TEXT NOT NULL,
-            trade_type      TEXT NOT NULL,
-            entry_price     REAL NOT NULL,
-            exit_price      REAL,
-            shares          REAL NOT NULL,
-            pnl             REAL,
-            pnl_pct         REAL,
-            strategy        TEXT DEFAULT '',
-            psych_notes     TEXT DEFAULT '',
-            created_at      TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # --- PDF Analysis Results ---
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pdf_analyses (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename        TEXT NOT NULL,
-            ticker          TEXT DEFAULT '',
-            revenue         REAL,
-            net_income      REAL,
-            total_debt      REAL,
-            total_equity    REAL,
-            profit_margin   REAL,
-            revenue_growth  REAL,
-            pe_ratio        REAL,
-            roe             REAL,
-            current_ratio   REAL,
-            raw_text        TEXT,
-            analyzed_at     TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # --- Stock Analyses (expanded, replaces pdf_analyses for new reports) ---
+    # --- Stock Analyses (advanced metrics) ---
+    # This table is also in models.py but using raw SQL here to ensure schema matches the raw INSERTs
     c.execute("""
         CREATE TABLE IF NOT EXISTS stock_analyses (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             filename        TEXT NOT NULL,
             source          TEXT DEFAULT 'generic',
-            ticker          TEXT DEFAULT '',
-            company_name    TEXT DEFAULT '',
+            ticker          TEXT,
+            company_name    TEXT,
             price           REAL,
             market_cap      REAL,
             pe_ratio        REAL,
@@ -184,7 +154,6 @@ def init_db():
     # Migration: add list_name column to watchlist
     try:
         c.execute("ALTER TABLE watchlist ADD COLUMN list_name TEXT DEFAULT 'Principal'")
-        conn.commit()
     except Exception:
         pass  # Column already exists
 
@@ -236,18 +205,96 @@ def init_db():
         except Exception:
             pass
 
+    # --- Trading Plan / Journal Entries ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trading_plan_entries (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha           TEXT NOT NULL,
+            activo          TEXT NOT NULL,
+            direccion       TEXT NOT NULL,
+            sesgo_1w        TEXT,
+            contexto_1d     TEXT,
+            gatillo         TEXT,
+            confluencias    TEXT,
+            entry_price     REAL,
+            sl              REAL,
+            tp1             REAL,
+            tp2             REAL,
+            rr_expected     REAL,
+            resultado       TEXT,
+            r_obtenido       REAL,
+            leccion         TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # --- Market Sentiment ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS market_sentiment (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker      TEXT,
+            source      TEXT,
+            sentiment   REAL,
+            mentions    INTEGER DEFAULT 0,
+            headline    TEXT,
+            url         TEXT,
+            score       REAL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # --- Macro Metrics (World Bank) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS macro_metrics (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            indicator   TEXT,
+            country     TEXT,
+            value       REAL,
+            year        INTEGER,
+            updated_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # --- Crypto Global Metrics ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_global (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_cap  REAL,
+            volume_24h  REAL,
+            btc_dominance REAL,
+            updated_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # --- Analyst Recommendations ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS analyst_recommendations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT UNIQUE,
+            strong_buy      INTEGER DEFAULT 0,
+            buy             INTEGER DEFAULT 0,
+            hold            INTEGER DEFAULT 0,
+            sell            INTEGER DEFAULT 0,
+            strong_sell      INTEGER DEFAULT 0,
+            target_mean     REAL,
+            target_median   REAL,
+            updated_at      TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     conn.commit()
     conn.close()
 
 
 # ── WATCHLIST ──────────────────────────────────────────────────────────────────
 def add_ticker(ticker: str, shares: float = 0, avg_cost: float = 0,
-               sector: str = "", notes: str = "", list_name: str = "Principal"):
+               sector: str = "", notes: str = "", list_name: str = "Principal",
+               stop_loss: float = None, take_profit: float = None):
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO watchlist (ticker, shares, avg_cost, sector, notes, list_name) VALUES (?,?,?,?,?,?)",
-            (ticker.upper(), shares, avg_cost, sector, notes, list_name)
+            "INSERT OR IGNORE INTO watchlist (ticker, shares, avg_cost, sector, notes, list_name, stop_loss, take_profit) VALUES (?,?,?,?,?,?,?,?)",
+            (ticker.upper(), shares, avg_cost, sector, notes, list_name, stop_loss, take_profit)
         )
         conn.commit()
     finally:
@@ -557,12 +604,12 @@ def delete_forex_trade(trade_id: int):
 
 
 # ── PRICE ALERTS ──────────────────────────────────────────────────────────────
-def add_alert(ticker: str, direction: str, threshold: float):
+def add_alert(ticker: str, direction: str, threshold: float, session: str = "Any"):
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT INTO price_alerts (ticker, direction, threshold) VALUES (?,?,?)",
-            (ticker.upper(), direction, threshold)
+            "INSERT INTO price_alerts (ticker, direction, threshold, session) VALUES (?,?,?,?)",
+            (ticker.upper(), direction, threshold, session)
         )
         conn.commit()
     finally:
@@ -589,5 +636,81 @@ def mark_triggered(alert_id: int):
         "UPDATE price_alerts SET triggered=1, triggered_at=datetime('now') WHERE id=?",
         (alert_id,)
     )
+    conn.close()
+
+# ── MARKET SENTIMENT ──────────────────────────────────────────────────────────
+def save_sentiment(ticker: str, source: str, sentiment: float, mentions: int = 0,
+                   headline: str = "", url: str = "", score: float = 0):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO market_sentiment (ticker, source, sentiment, mentions, headline, url, score) VALUES (?,?,?,?,?,?,?)",
+        (ticker.upper() if ticker else None, source, sentiment, mentions, headline, url, score)
+    )
     conn.commit()
     conn.close()
+
+def get_latest_sentiment(ticker: str = None, limit: int = 20) -> pd.DataFrame:
+    conn = get_connection()
+    if ticker:
+        query = "SELECT * FROM market_sentiment WHERE ticker = ? ORDER BY created_at DESC LIMIT ?"
+        df = pd.read_sql(query, conn, params=(ticker.upper(), limit))
+    else:
+        query = "SELECT * FROM market_sentiment ORDER BY created_at DESC LIMIT ?"
+        df = pd.read_sql(query, conn, params=(limit,))
+    conn.close()
+    return df
+
+# ── MACRO METRICS ─────────────────────────────────────────────────────────────
+def save_macro_metric(indicator: str, country: str, value: float, year: int):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO macro_metrics (indicator, country, value, year) VALUES (?,?,?,?)",
+        (indicator, country, value, year)
+    )
+    conn.commit()
+    conn.close()
+
+def get_macro_metrics(indicator: str = None) -> pd.DataFrame:
+    conn = get_connection()
+    if indicator:
+        df = pd.read_sql("SELECT * FROM macro_metrics WHERE indicator = ? ORDER BY year DESC", conn, params=(indicator,))
+    else:
+        df = pd.read_sql("SELECT * FROM macro_metrics ORDER BY updated_at DESC", conn)
+    conn.close()
+    return df
+
+# ── CRYPTO GLOBAL ─────────────────────────────────────────────────────────────
+def save_crypto_global(market_cap: float, volume_24h: float, btc_dominance: float):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO crypto_global (market_cap, volume_24h, btc_dominance) VALUES (?,?,?)",
+        (market_cap, volume_24h, btc_dominance)
+    )
+    conn.commit()
+    conn.close()
+
+def get_latest_crypto_global():
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM crypto_global ORDER BY updated_at DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+# ── ANALYST RECOMMENDATIONS ───────────────────────────────────────────────────
+def save_analyst_recommendation(ticker: str, data: dict):
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR REPLACE INTO analyst_recommendations
+           (ticker, strong_buy, buy, hold, sell, strong_sell, target_mean, target_median, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,datetime('now'))""",
+        (ticker.upper(), data.get('strong_buy', 0), data.get('buy', 0),
+         data.get('hold', 0), data.get('sell', 0), data.get('strong_sell', 0),
+         data.get('target_mean'), data.get('target_median'))
+    )
+    conn.commit()
+    conn.close()
+
+def get_analyst_recommendation(ticker: str):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM analyst_recommendations WHERE ticker = ?", (ticker.upper(),)).fetchone()
+    conn.close()
+    return dict(row) if row else None

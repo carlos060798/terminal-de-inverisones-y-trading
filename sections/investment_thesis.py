@@ -35,8 +35,8 @@ def render():
         except Exception:
             pass
 
-        tab_moat, tab_porter, tab_thesis, tab_notes = st.tabs([
-            "🏰 MOAT", "⚡ Porter 5 Fuerzas", "📊 Bull / Bear", "📝 Notas"
+        tab_moat, tab_porter, tab_score, tab_thesis, tab_notes = st.tabs([
+            "🏰 MOAT", "⚡ Porter 5 Fuerzas", "📈 Puntuación", "📊 Bull / Bear", "📝 Notas"
         ])
 
         # ── MOAT TAB ──
@@ -127,6 +127,59 @@ def render():
                 Promedio: {avg_porter:.1f}/5 — {porter_verdict}
             </div>""", unsafe_allow_html=True)
 
+        # ── SCORE TAB ──
+        with tab_score:
+            st.markdown("<div class='sec-title'>Puntuación Global de la Tesis</div>", unsafe_allow_html=True)
+            sc1, sc2 = st.columns([1, 1])
+            with sc1:
+                growth_r = st.slider("Potencial de Crecimiento", 1, 5, value=max(1, existing.get("score_growth", 3)), key="s_growth")
+                health_r = st.slider("Salud Financiera", 1, 5, value=max(1, existing.get("score_health", 3)), key="s_health")
+                mgmt_r = st.slider("Calidad Directiva (Management)", 1, 5, value=max(1, existing.get("score_mgmt", 3)), key="s_mgmt")
+                val_r = st.slider("Margen de Valoración", 1, 5, value=max(1, existing.get("score_val", 3)), key="s_val")
+
+            # Calculate axes
+            # Competitive Strength = 6 - avg_porter (so 1 porter -> 5 strength)
+            comp_strength = 6 - avg_porter
+            
+            axes = ["MOAT", "Fortaleza\nCompetitiva", "Crecimiento", "Salud\nFinanciera", "Management", "Valoración"]
+            scores = [moat_rating, comp_strength, growth_r, health_r, mgmt_r, val_r]
+            
+            with sc2:
+                fig_score = go.Figure()
+                fig_score.add_trace(go.Scatterpolar(
+                    r=scores + [scores[0]],
+                    theta=axes + [axes[0]],
+                    fill='toself',
+                    fillcolor='rgba(34, 197, 94, 0.2)',
+                    line=dict(color='#22c55e', width=3),
+                    marker=dict(size=8, color='#22c55e'),
+                ))
+                fig_score.update_layout(
+                    polar=dict(
+                        radialaxis=dict(visible=True, range=[0, 5], tickvals=[1,2,3,4,5],
+                                        gridcolor="#1a1a1a", tickfont=dict(color="#64748b", size=10)),
+                        angularaxis=dict(gridcolor="#1a1a1a", tickfont=dict(color="#94a3b8", size=11)),
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
+                    showlegend=False,
+                    margin=dict(l=60, r=60, t=40, b=40),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    height=400,
+                )
+                st.plotly_chart(fig_score, use_container_width=True)
+
+            total_score = sum(scores)
+            max_score = len(scores) * 5
+            score_pct = (total_score / max_score) * 100
+            
+            st.markdown(f"""
+            <div style='background:rgba(34,197,94,0.1);border:1px solid #22c55e;padding:15px;
+                 border-radius:12px;text-align:center;'>
+                <span style='color:#22c55e;font-size:24px;font-weight:800;'>Puntaje de Calidad: {score_pct:.1f}%</span><br>
+                <span style='color:#94a3b8;font-size:14px;'>{total_score} de {max_score} puntos posibles</span>
+            </div>""", unsafe_allow_html=True)
+
         # ── BULL/BEAR TAB ──
         with tab_thesis:
             st.markdown("<div class='sec-title'>Caso Bull / Bear</div>", unsafe_allow_html=True)
@@ -202,6 +255,10 @@ def render():
                 "thesis_bull": thesis_bull,
                 "thesis_bear": thesis_bear,
                 "thesis_verdict": thesis_verdict,
+                "score_growth": growth_r,
+                "score_health": health_r,
+                "score_mgmt": mgmt_r,
+                "score_val": val_r,
                 "custom_notes": custom_notes,
             }
             db.save_investment_notes(thesis_ticker, notes_payload)

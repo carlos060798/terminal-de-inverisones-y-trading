@@ -222,19 +222,19 @@ def render():
                     try:
                         # Map strategy to function and params
                         if strategy == "SMA Crossover":
-                            wf_fn = _run_sma_crossover
+                            wf_fn = VectorizedEngine.run_sma_crossover
                             wf_params = {"fast": fast_period, "slow": slow_period}
                         elif strategy == "RSI Oversold/Overbought":
-                            wf_fn = _run_rsi_strategy
+                            wf_fn = VectorizedEngine.run_rsi_strategy
                             wf_params = {"period": rsi_period, "oversold": oversold, "overbought": overbought}
                         elif strategy == "Bollinger Breakout":
-                            wf_fn = run_bollinger
+                            wf_fn = VectorizedEngine.run_bollinger
                             wf_params = {"window": bb_window, "num_std": bb_std}
                         elif strategy == "Mean Reversion":
-                            wf_fn = run_mean_reversion
+                            wf_fn = VectorizedEngine.run_mean_reversion
                             wf_params = {"window": mr_window, "threshold": mr_threshold}
                         elif strategy == "MACD Crossover":
-                            wf_fn = run_macd_crossover
+                            wf_fn = VectorizedEngine.run_macd_crossover
                             wf_params = {"fast": macd_fast, "slow": macd_slow, "signal": macd_signal}
 
                         n_splits = st.slider("Número de folds", min_value=3, max_value=10, value=5, key="wf_splits")
@@ -292,32 +292,32 @@ def render():
 
                         # Define param grids per strategy
                         if strategy == "SMA Crossover":
-                            opt_fn = _run_sma_crossover
+                            opt_fn = VectorizedEngine.run_sma_crossover
                             param_grid = {
                                 "fast": [10, 15, 20, 25, 30],
                                 "slow": [30, 40, 50, 60, 80],
                             }
                         elif strategy == "RSI Oversold/Overbought":
-                            opt_fn = _run_rsi_strategy
+                            opt_fn = VectorizedEngine.run_rsi_strategy
                             param_grid = {
                                 "period": [10, 14, 20],
                                 "oversold": [20, 25, 30, 35],
                                 "overbought": [65, 70, 75, 80],
                             }
                         elif strategy == "Bollinger Breakout":
-                            opt_fn = run_bollinger
+                            opt_fn = VectorizedEngine.run_bollinger
                             param_grid = {
                                 "window": [10, 15, 20, 25, 30],
                                 "num_std": [1.0, 1.5, 2.0, 2.5, 3.0],
                             }
                         elif strategy == "Mean Reversion":
-                            opt_fn = run_mean_reversion
+                            opt_fn = VectorizedEngine.run_mean_reversion
                             param_grid = {
                                 "window": [10, 15, 20, 25, 30],
                                 "threshold": [1.0, 1.25, 1.5, 2.0, 2.5],
                             }
                         elif strategy == "MACD Crossover":
-                            opt_fn = run_macd_crossover
+                            opt_fn = VectorizedEngine.run_macd_crossover
                             param_grid = {
                                 "fast": [8, 10, 12, 15],
                                 "slow": [20, 26, 30],

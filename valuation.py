@@ -5,9 +5,11 @@ Computes fair value estimates using multiple methods:
 2. Simple DCF (discounted free cash flow)
 3. PEG-based valuation
 """
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from cache_utils import get_ticker_info, get_financials
 
 # Sector median P/E ratios (approximate, based on historical averages)
 SECTOR_PE = {
@@ -39,20 +41,10 @@ SECTOR_EV_EBITDA = {
 }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_fair_values(ticker: str, parsed_data: dict = None):
     """
     Compute multiple fair value estimates for a stock.
-
-    Returns dict with:
-        pe_fair_value: P/E based fair value
-        dcf_fair_value: Simple DCF fair value
-        peg_fair_value: PEG-based fair value
-        avg_fair_value: Average of available estimates
-        current_price: Current market price
-        signal: 'undervalued', 'fair', 'overvalued'
-        signal_color: 'green', 'yellow', 'red'
-        upside_pct: Percentage upside/downside to avg fair value
-        details: Dict with computation details
     """
     result = {
         "pe_fair_value": None,
@@ -66,10 +58,8 @@ def compute_fair_values(ticker: str, parsed_data: dict = None):
         "details": {},
     }
 
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-    except Exception:
+    info = get_ticker_info(ticker)
+    if not info:
         return result
 
     price = info.get("currentPrice") or info.get("regularMarketPrice")
@@ -126,7 +116,8 @@ def compute_fair_values(ticker: str, parsed_data: dict = None):
 
     # ── Method 2: Simple DCF ──
     try:
-        cashflow = tk.cashflow
+        fins = get_financials(ticker)
+        cashflow = fins.get('cashflow')
         if cashflow is not None and not cashflow.empty:
             # Get operating cash flow
             ocf_row = None
@@ -226,6 +217,7 @@ def compute_fair_values(ticker: str, parsed_data: dict = None):
     return result
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_advanced_metrics(ticker: str):
     """
     Compute advanced metrics from yfinance: DuPont, ROIC, ROCE, Debt/EBITDA, etc.
@@ -256,12 +248,11 @@ def compute_advanced_metrics(ticker: str):
         "revenue_cagr_3y": None,
     }
 
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        financials = tk.financials
-        balance = tk.balance_sheet
-    except Exception:
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    financials = fins.get('income')
+    balance = fins.get('balance')
+    if not info or financials is None or balance is None:
         return result
 
     # From info dict
@@ -459,11 +450,13 @@ def compute_quality_score(ticker: str, moat_rating: int = None) -> dict:
     }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_dcf_scenarios(ticker: str, parsed_data: dict = None) -> dict:
     """DCF with Pessimistic/Base/Optimistic scenarios."""
+    info = get_ticker_info(ticker)
+    if not info:
+        return {}
     try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
 
         # Get base growth rate (same logic as existing DCF)
         roe = (info.get("returnOnEquity") or 0)
@@ -521,6 +514,7 @@ def compute_dcf_scenarios(ticker: str, parsed_data: dict = None) -> dict:
         return {}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_health_scores(ticker: str) -> dict:
     """
     Compute Altman Z-Score and Piotroski F-Score for financial health assessment.
@@ -529,15 +523,15 @@ def compute_health_scores(ticker: str) -> dict:
     result = {"z_score": None, "z_label": None, "f_score": None, "f_label": None,
               "sloan_ratio": None, "sloan_label": None,
               "z_details": {}, "f_details": {}, "sloan_details": {}}
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        balance = tk.balance_sheet
-        financials = tk.financials
-        cashflow = tk.cashflow
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    balance = fins.get('balance')
+    financials = fins.get('income')
+    cashflow = fins.get('cashflow')
 
-        if balance.empty or financials.empty:
-            return result
+    if not info or balance is None or balance.empty or financials is None or financials.empty:
+        return result
+    try:
 
         # Helper to get first column value from financial statement
         def _get(df, labels):
@@ -670,17 +664,18 @@ def compute_health_scores(ticker: str) -> dict:
     return result
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_dcf_professional(ticker: str, wacc_override: float = None) -> dict:
     """Institutional DCF following InValor/JPMorgan methodology."""
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        inc = tk.income_stmt
-        bs = tk.balance_sheet
-        cf = tk.cashflow
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    inc = fins.get('income')
+    bs = fins.get('balance')
+    cf = fins.get('cashflow')
 
-        if inc is None or inc.empty or bs is None or bs.empty or cf is None or cf.empty:
-            return {}
+    if not info or inc is None or inc.empty or bs is None or bs.empty or cf is None or cf.empty:
+        return {}
+    try:
 
         # Step 1: Calculate FCFF
         ebit = None
@@ -865,6 +860,7 @@ def monte_carlo_dcf(ticker, n_simulations=1000, wacc_sigma=0.01, growth_sigma=0.
         return None
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_capital_returns(ticker: str) -> dict:
     """Compute ROIC, ROCE, and Shareholder Yield (B3 + B4)."""
     result = {
@@ -874,15 +870,15 @@ def compute_capital_returns(ticker: str) -> dict:
         "div_yield": None, "buyback_yield": None,
         "debt_paydown_yield": None, "shareholder_yield": None,
     }
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        financials = tk.financials
-        balance = tk.balance_sheet
-        cf = tk.cashflow
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    financials = fins.get('income')
+    balance = fins.get('balance')
+    cf = fins.get('cashflow')
 
-        if financials is None or financials.empty or balance is None or balance.empty:
-            return result
+    if not info or financials is None or financials.empty or balance is None or balance.empty:
+        return result
+    try:
 
         def _get(df, labels):
             for label in labels:
@@ -989,14 +985,16 @@ SECTOR_MULTIPLES = {
 }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_multiples(ticker: str) -> dict:
     """Compute expanded valuation multiples with sector comparison (B5)."""
     result = {"multiples": [], "sector": ""}
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    cf = fins.get('cashflow')
+    if not info:
+        return result
     try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        cf = tk.cashflow
-
         sector = info.get("sector", "")
         result["sector"] = sector
         sector_med = SECTOR_MULTIPLES.get(sector, SECTOR_MULTIPLES.get("Technology", {}))
@@ -1126,6 +1124,7 @@ def compute_multiples(ticker: str) -> dict:
     return result
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def compute_wacc(ticker: str) -> dict:
     """
     Compute Weighted Average Cost of Capital (WACC).
@@ -1133,11 +1132,13 @@ def compute_wacc(ticker: str) -> dict:
     Returns dict with all components or empty dict on failure.
     """
     result = {}
+    info = get_ticker_info(ticker)
+    fins = get_financials(ticker)
+    financials = fins.get('income')
+    balance = fins.get('balance')
+    if not info:
+        return result
     try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        financials = tk.financials
-        balance = tk.balance_sheet
 
         # Risk-free rate from 10Y Treasury
         try:

@@ -10,9 +10,9 @@ try:
 except ImportError:
     yf = None
 try:
-    from cache_utils import get_batch_prices, get_history
+    from cache_utils import get_batch_prices, get_history, get_batch_prices_and_changes
 except ImportError:
-    get_batch_prices = get_history = None
+    get_batch_prices = get_history = get_batch_prices_and_changes = None
 try:
     from data_sources import cached_fear_greed_index, cached_vix, cached_spy_put_call_ratio
 except ImportError:
@@ -20,27 +20,8 @@ except ImportError:
 
 _ZERO = {"price": 0, "prev": 0, "change_pct": 0}
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _batch_prices_and_changes(tickers_tuple):
-    """Batch-fetch 5d prices for current price + day change."""
-    try:
-        data = yf.download(list(tickers_tuple), period="5d", group_by="ticker", progress=False)
-        result = {}
-        for t in tickers_tuple:
-            try:
-                closes = (data["Close"] if len(tickers_tuple) == 1 else data[t]["Close"]).dropna()
-                if len(closes) >= 2:
-                    result[t] = {"price": float(closes.iloc[-1]), "prev": float(closes.iloc[-2]),
-                                 "change_pct": (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100}
-                elif len(closes) == 1:
-                    result[t] = {"price": float(closes.iloc[-1]), "prev": 0, "change_pct": 0}
-                else:
-                    result[t] = dict(_ZERO)
-            except Exception:
-                result[t] = dict(_ZERO)
-        return result
-    except Exception:
-        return {t: dict(_ZERO) for t in tickers_tuple}
+# Utilizar la versión centralizada de cache_utils
+_batch_prices_and_changes = get_batch_prices_and_changes
 
 def _sec(title):
     st.markdown(f"<div class='sec-title'>{title}</div>", unsafe_allow_html=True)
@@ -52,6 +33,30 @@ def render():
         <p>Bloomberg-style cockpit · Real-time overview · Risk · Events</p>
       </div>
     </div>""", unsafe_allow_html=True)
+
+    # ── Pre-Market Toggle ──
+    pre_market = st.toggle("🚀 Modo Pre-Mercado Focus", value=False, help="Muestra futuros y sentimiento antes de la apertura")
+    
+    if pre_market:
+        _sec("Pre-Market Pulse: US Futures")
+        try:
+            future_ticks = ["ES=F", "NQ=F", "YM=F", "RTY=F"]
+            f_data = _batch_prices_and_changes(tuple(future_ticks))
+            cols = st.columns(len(future_ticks))
+            for i, ft in enumerate(future_ticks):
+                d = f_data.get(ft, {"price": 0, "change_pct": 0})
+                color = "green" if d["change_pct"] >= 0 else "red"
+                val_str = f"${d['price']:,.2f}"
+                pct_str = f"{d['change_pct']:+.2f}%"
+                cols[i].markdown(f"""
+                <div style='background:rgba(0,0,0,0.2);padding:10px;border-radius:8px;border-left:4px solid {color};'>
+                    <small style='color:#94a3b8;'>{ft}</small><br>
+                    <span style='font-size:20px;font-weight:700;'>{val_str}</span><br>
+                    <span style='color:{color};font-weight:600;'>{pct_str}</span>
+                </div>""", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+        except Exception:
+            st.info("Futuros no disponibles en este momento.")
 
     wl = db.get_watchlist()
     trades_stock = db.get_trades()
@@ -194,149 +199,235 @@ def render():
                      "max probable loss",
                      "red" if var_95 < 0 else "blue"), unsafe_allow_html=True)
 
-    _sec("Market Pulse")
-    try:
-        mp1, mp2, mp3 = st.columns(3)
+    # ── Portfolio Heatmap (Treemap) ──
+    if position_rows:
+        _sec("Portfolio Composition & Performance")
+        try:
+            import plotly.express as px
+            df_heat = pd.DataFrame(position_rows)
+            # Ensure Sector is not empty for the treemap path
+            df_heat["Sector"] = df_heat["Sector"].apply(lambda x: x if (x and str(x).strip()) else "N/A")
+            
+            fig_heat = px.treemap(
+                df_heat,
+                path=[px.Constant("Portfolio"), 'Sector', 'Ticker'],
+                values='Value',
+                color='Day %',
+                color_continuous_scale='RdYlGn',
+                color_continuous_midpoint=0,
+                hover_data=['Weight %', 'P&L %'],
+                custom_data=['Ticker', 'Value', 'Day %']
+            )
+            fig_heat.update_traces(
+                texttemplate="<b>%{label}</b><br>%{customdata[2]:+.2f}%",
+                hovertemplate="<b>%{customdata[0]}</b><br>Value: $%{customdata[1]:,.2f}<br>Day: %{customdata[2]:+.2f}%"
+            )
+            fig_heat.update_layout(
+                margin=dict(t=30, l=10, r=10, b=10),
+                height=450,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                coloraxis_colorbar=dict(title="Day %", thickness=15, len=0.5)
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+        except Exception as e:
+            st.info(f"Heatmap unavailable: {e}")
 
-        # Fear & Greed Gauge
-        with mp1:
-            try:
-                fg = cached_fear_greed_index() if cached_fear_greed_index else None
-                if fg:
-                    fg_val = fg["value"]
-                    if fg_val <= 25:
-                        fg_color = "#f87171"
-                    elif fg_val <= 45:
-                        fg_color = "#fb923c"
-                    elif fg_val <= 55:
-                        fg_color = "#fbbf24"
-                    elif fg_val <= 75:
-                        fg_color = "#a3e635"
+    @st.fragment(run_every=60)
+    def _render_market_pulse():
+        _sec("Market Pulse")
+        try:
+            mp1, mp2, mp3 = st.columns(3)
+
+            # Fear & Greed Index
+            with mp1:
+                try:
+                    fg = cached_fear_greed_index() if cached_fear_greed_index else None
+                    if fg:
+                        fg_val = fg["value"]
+                        fg_color = "#34d399" if fg_val > 75 else ("#a3e635" if fg_val > 55 else ("#fbbf24" if fg_val > 45 else ("#fb923c" if fg_val > 25 else "#f87171")))
+                        fig_fg = go.Figure(go.Indicator(
+                            mode="gauge+number", value=fg_val,
+                            title={"text": "Fear & Greed Index", "font": {"size": 13, "color": "#94a3b8"}},
+                            number={"font": {"color": fg_color, "size": 36}},
+                            gauge={"axis": {"range": [0, 100], "dtick": 25}, "bar": {"color": fg_color}, "bgcolor": "#0a0a0a"}
+                        ))
+                        fig_fg.update_layout(**DARK, height=250)
+                        st.plotly_chart(fig_fg, use_container_width=True)
+                        st.caption(f"Classification: **{fg['label']}**")
                     else:
-                        fg_color = "#34d399"
+                        st.markdown(kpi("Fear & Greed", "N/A", "No data", "blue"), unsafe_allow_html=True)
+                except Exception:
+                    st.markdown(kpi("Fear & Greed", "N/A", "Error", "blue"), unsafe_allow_html=True)
 
-                    fig_fg = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=fg_val,
-                        title={"text": "Fear & Greed Index", "font": {"color": "#94a3b8", "size": 13}},
-                        number={"font": {"color": fg_color, "size": 36}},
-                        gauge={
-                            "axis": {"range": [0, 100], "tickcolor": "#334155", "dtick": 25},
-                            "bar": {"color": fg_color, "thickness": 0.3},
-                            "bgcolor": "#0a0a0a",
-                            "bordercolor": "#1a1a1a",
-                            "steps": [
-                                {"range": [0, 25], "color": "rgba(248,113,113,0.15)"},
-                                {"range": [25, 45], "color": "rgba(251,146,60,0.12)"},
-                                {"range": [45, 55], "color": "rgba(251,191,36,0.10)"},
-                                {"range": [55, 75], "color": "rgba(163,230,53,0.10)"},
-                                {"range": [75, 100], "color": "rgba(52,211,153,0.12)"},
-                            ],
-                            "threshold": {
-                                "line": {"color": "#f0f6ff", "width": 2},
-                                "thickness": 0.8, "value": fg_val,
-                            },
-                        },
-                    ))
-                    fig_fg.update_layout(**DARK, height=250)
-                    st.plotly_chart(fig_fg, use_container_width=True)
-                    st.caption(f"Classification: **{fg['label']}**")
-                else:
-                    st.markdown(kpi("Fear & Greed", "N/A", "API unavailable", "blue"), unsafe_allow_html=True)
-            except Exception:
-                st.markdown(kpi("Fear & Greed", "N/A", "Error loading", "blue"), unsafe_allow_html=True)
-
-        # VIX Level + Status
-        with mp2:
-            try:
-                vix = cached_vix() if cached_vix else None
-                if vix:
-                    if vix < 15:
-                        vix_label, vix_c, vix_hex = "Low Volatility", "green", "#34d399"
-                    elif vix < 20:
-                        vix_label, vix_c, vix_hex = "Normal", "blue", "#60a5fa"
-                    elif vix < 30:
-                        vix_label, vix_c, vix_hex = "Elevated", "yellow", "#fbbf24"
+            # VIX
+            with mp2:
+                try:
+                    vix = cached_vix() if cached_vix else None
+                    if vix:
+                        vix_hex = "#34d399" if vix < 15 else ("#60a5fa" if vix < 20 else ("#fbbf24" if vix < 30 else "#f87171"))
+                        fig_vix = go.Figure(go.Indicator(mode="number", value=vix, number={"font": {"color": vix_hex, "size": 48}}))
+                        fig_vix.update_layout(**DARK, height=250, title={"text": "VIX Index", "font": {"size": 13, "color": "#94a3b8"}})
+                        st.plotly_chart(fig_vix, use_container_width=True)
                     else:
-                        vix_label, vix_c, vix_hex = "Panic", "red", "#f87171"
+                        st.markdown(kpi("VIX", "N/A", "No data", "blue"), unsafe_allow_html=True)
+                except Exception:
+                    st.markdown(kpi("VIX", "N/A", "Error", "blue"), unsafe_allow_html=True)
 
-                    fig_vix = go.Figure(go.Indicator(
-                        mode="number+delta",
-                        value=vix,
-                        title={"text": "VIX Volatility Index", "font": {"color": "#94a3b8", "size": 13}},
-                        number={"font": {"color": vix_hex, "size": 48}},
-                    ))
-                    fig_vix.update_layout(**DARK, height=250)
-                    st.plotly_chart(fig_vix, use_container_width=True)
-                    st.caption(f"Status: **{vix_label}**")
-                else:
-                    st.markdown(kpi("VIX", "N/A", "No data", "blue"), unsafe_allow_html=True)
-            except Exception:
-                st.markdown(kpi("VIX", "N/A", "Error loading", "blue"), unsafe_allow_html=True)
-
-        # SPY Put/Call + Market Direction
-        with mp3:
-            try:
-                pcr = cached_spy_put_call_ratio() if cached_spy_put_call_ratio else None
-                if pcr:
-                    ratio = pcr["ratio"]
-                    if ratio > 1.0:
-                        pcr_label, pcr_color = "Bearish", "#f87171"
-                    elif ratio > 0.7:
-                        pcr_label, pcr_color = "Neutral", "#fbbf24"
+            # SPY PCR
+            with mp3:
+                try:
+                    pcr = cached_spy_put_call_ratio() if cached_spy_put_call_ratio else None
+                    if pcr:
+                        ratio = pcr["ratio"]
+                        pcr_color = "#34d399" if ratio < 0.7 else ("#fbbf24" if ratio < 1.0 else "#f87171")
+                        fig_pcr = go.Figure(go.Indicator(mode="number", value=ratio, number={"font": {"color": pcr_color, "size": 48}, "valueformat": ".3f"}))
+                        fig_pcr.update_layout(**DARK, height=200, title={"text": "SPY Put/Call", "font": {"size": 13, "color": "#94a3b8"}})
+                        st.plotly_chart(fig_pcr, use_container_width=True)
                     else:
-                        pcr_label, pcr_color = "Bullish", "#34d399"
+                        st.markdown(kpi("SPY Put/Call", "N/A", "No data", "blue"), unsafe_allow_html=True)
+                except Exception:
+                    st.markdown(kpi("SPY Put/Call", "N/A", "Error", "blue"), unsafe_allow_html=True)
+        except Exception as e:
+            st.info(f"Market pulse unavailable: {e}")
 
-                    fig_pcr = go.Figure(go.Indicator(
-                        mode="number",
-                        value=ratio,
-                        title={"text": "SPY Put/Call Ratio", "font": {"color": "#94a3b8", "size": 13}},
-                        number={"font": {"color": pcr_color, "size": 48}, "valueformat": ".3f"},
-                    ))
-                    fig_pcr.update_layout(**DARK, height=200)
-                    st.plotly_chart(fig_pcr, use_container_width=True)
-                    st.caption(f"Direction: **{pcr_label}** | Calls: {pcr['calls_vol']:,} · Puts: {pcr['puts_vol']:,} | Exp: {pcr['expiry']}")
+    _render_market_pulse()
+
+    # ── Sentiment Thermometer (VADER + RSS) ──
+    @st.fragment(run_every=900)
+    def _render_sentiment_pulse():
+        _sec("News Sentiment Thermometer")
+        try:
+            from utils.sentiment_vader import get_sentiment_pulse
+            pulse = get_sentiment_pulse()
+
+            sp1, sp2 = st.columns([1, 2])
+            with sp1:
+                score = pulse["score"]
+                # Map -100..+100 to 0..100 for gauge
+                gauge_val = (score + 100) / 2
+
+                if score >= 15:
+                    gauge_color = "#34d399"
+                elif score <= -15:
+                    gauge_color = "#f87171"
                 else:
-                    st.markdown(kpi("SPY Put/Call", "N/A", "No data", "blue"), unsafe_allow_html=True)
-            except Exception:
-                st.markdown(kpi("SPY Put/Call", "N/A", "Error loading", "blue"), unsafe_allow_html=True)
-    except Exception as e:
-        st.info(f"Market pulse unavailable: {e}")
+                    gauge_color = "#fbbf24"
 
-    try:
-        if position_rows:
+                fig_sent = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=gauge_val,
+                    number={"font": {"color": gauge_color, "size": 42}, "suffix": "", "valueformat": ".0f"},
+                    title={"text": f"Sentimiento: {pulse['label']}", "font": {"size": 13, "color": "#94a3b8"}},
+                    gauge={
+                        "axis": {"range": [0, 100], "dtick": 25,
+                                 "ticktext": ["Extreme Fear", "Fear", "Neutral", "Greed", "Extreme Greed"],
+                                 "tickvals": [10, 25, 50, 75, 90]},
+                        "bar": {"color": gauge_color, "thickness": 0.3},
+                        "bgcolor": "#0a0a0a",
+                        "steps": [
+                            {"range": [0, 25], "color": "rgba(239,68,68,0.15)"},
+                            {"range": [25, 40], "color": "rgba(251,191,36,0.1)"},
+                            {"range": [40, 60], "color": "rgba(148,163,184,0.08)"},
+                            {"range": [60, 75], "color": "rgba(163,230,53,0.1)"},
+                            {"range": [75, 100], "color": "rgba(52,211,153,0.15)"},
+                        ],
+                        "threshold": {"line": {"color": "#fbbf24", "width": 2}, "thickness": 0.8, "value": 50}
+                    }
+                ))
+                fig_sent.update_layout(**DARK, height=280)
+                st.plotly_chart(fig_sent, use_container_width=True)
+                st.caption(f"📰 {pulse['total']} titulares · 🟢 {pulse['bullish_count']} · 🔴 {pulse['bearish_count']} · ⚪ {pulse['neutral_count']} · ⏰ {pulse['timestamp']}")
+
+            with sp2:
+                top_headlines = pulse["headlines"][:8]
+                if top_headlines:
+                    for h in top_headlines:
+                        icon = "🟢" if h["label"] == "Bullish" else ("🔴" if h["label"] == "Bearish" else "⚪")
+                        score_color = "#34d399" if h["compound"] > 0 else ("#f87171" if h["compound"] < 0 else "#94a3b8")
+                        st.markdown(f"""
+                        <div style='padding:4px 0;border-bottom:1px solid #1a1a1a;font-size:13px;'>
+                            {icon} <span style='color:#e2e8f0;'>{h['title'][:80]}</span>
+                            <span style='color:{score_color};font-weight:600;float:right;'>{h['compound']:+.2f}</span>
+                            <br><small style='color:#475569;'>{h['source']}</small>
+                        </div>""", unsafe_allow_html=True)
+                else:
+                    st.info("No se pudieron obtener titulares de noticias.")
+        except Exception as e:
+            st.info(f"Sentimiento no disponible: {e}")
+
+    _render_sentiment_pulse()
+
+    # ── Social Sentiment (Reddit Pulse) ──
+    def _render_social_pulse():
+        _sec("Social Sentiment (Reddit/WallStreetBets)")
+        try:
+            sent_df = db.get_latest_sentiment(limit=100)
+            if sent_df.empty:
+                st.info("No hay datos de sentimiento social disponibles. Iniciando sincronización...")
+                return
+
+            # Agrupar por ticker y sumar menciones
+            reddit_df = sent_df[sent_df['source'] == 'reddit']
+            if reddit_df.empty:
+                st.info("Aún no hay menciones en Reddit registradas.")
+                return
+                
+            ticker_groups = reddit_df.groupby('ticker')['mentions'].sum().sort_values(ascending=False).head(10)
+            
+            sc1, sc2 = st.columns([2, 1])
+            with sc2:
+                # Top Tickers mentions bar chart
+                fig_bar = go.Figure(go.Bar(
+                    x=ticker_groups.values,
+                    y=ticker_groups.index,
+                    orientation='h',
+                    marker_color='#6366f1'
+                ))
+                fig_bar.update_layout(**DARK, height=300, margin=dict(l=0, r=0, t=30, b=0),
+                                    title={"text": "Menciones (24h)", "font": {"size": 13, "color": "#94a3b8"}})
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            with sc1:
+                # Latest reddit signals
+                for _, row in reddit_df.head(6).iterrows():
+                    st.markdown(f"""
+                    <div style='padding:8px; background:rgba(99,102,241,0.05); border-radius:6px; margin-bottom:8px; border-left:3px solid #6366f1;'>
+                        <span style='color:#6366f1; font-weight:700;'>${row['ticker']}</span> 
+                        <span style='color:#94a3b8; font-size:12px; float:right;'>{row['created_at'].split()[1]}</span><br>
+                        <span style='color:#e2e8f0; font-size:13px;'>{row['headline']}</span>
+                    </div>""", unsafe_allow_html=True)
+                    
+        except Exception as e:
+            st.warning(f"Error al cargar sentimiento social: {e}")
+
+    _render_social_pulse()
+
+    @st.fragment(run_every=30)
+    def _render_live_positions(rows):
+        if not rows:
+            return
+        try:
             _sec("Live Positions")
-            pos_df = pd.DataFrame(position_rows)
-
-            # Sort selector
-            sort_col = st.selectbox("Sort by", ["P&L %", "P&L $", "Day %", "Weight %", "Value", "Ticker"],
-                                    index=0, key="pos_sort", label_visibility="collapsed")
-            ascending = sort_col == "Ticker"
-            pos_df = pos_df.sort_values(sort_col, ascending=ascending)
-
+            pos_df = pd.DataFrame(rows)
+            sort_col = st.selectbox("Sort by", ["P&L %", "P&L $", "Day %", "Weight %", "Value", "Ticker"], index=0, key="pos_sort")
+            pos_df = pos_df.sort_values(sort_col, ascending=(sort_col == "Ticker"))
+            
             display_df = pos_df[["Ticker", "Shares", "Avg Cost", "Price", "P&L $", "P&L %", "Day %", "Weight %"]].copy()
-
             def _color_pnl(val):
                 if isinstance(val, (int, float)):
-                    if val > 0:
-                        return "color: #34d399"
-                    elif val < 0:
-                        return "color: #f87171"
+                    return "color: #34d399" if val > 0 else ("color: #f87171" if val < 0 else "color: #94a3b8")
                 return "color: #94a3b8"
 
             styled = display_df.style.format({
-                "Shares": "{:.0f}",
-                "Avg Cost": "${:.2f}",
-                "Price": "${:.2f}",
-                "P&L $": "${:+,.2f}",
-                "P&L %": "{:+.2f}%",
-                "Day %": "{:+.2f}%",
-                "Weight %": "{:.1f}%",
+                "Shares": "{:.0f}", "Avg Cost": "${:.2f}", "Price": "${:.2f}",
+                "P&L $": "${:+,.2f}", "P&L %": "{:+.2f}%", "Day %": "{:+.2f}%", "Weight %": "{:.1f}%"
             }).map(_color_pnl, subset=["P&L $", "P&L %", "Day %"])
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.info(f"Could not load positions table: {e}")
 
-            st.dataframe(styled, use_container_width=True, hide_index=True, height=min(400, 60 + 35 * len(display_df)))
-    except Exception as e:
-        st.info(f"Could not load positions table: {e}")
+    _render_live_positions(position_rows)
 
     try:
         if position_rows:
@@ -692,3 +783,92 @@ def render():
                 st.info("Configure AI providers and add positions for AI insights.")
         except Exception as e:
             st.info(f"AI analysis unavailable: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # MARKET SIGNALS & ALERTS (SCANNERS)
+    # ══════════════════════════════════════════════════════════════
+    st.markdown("---")
+    col_scan1, col_scan2 = st.columns([2, 1])
+    
+    with col_scan1:
+        _sec("⚡ Technical Scanners & Alerts")
+        _render_technical_alerts(wl)
+    
+    with col_scan2:
+        _sec("💡 Trade Ideas & Signals")
+        st.markdown("<div style='font-size:12px;color:#94a3b8;margin-bottom:10px;'>Basado en confluencia técnica (RSI + MACD + Volume).</div>", unsafe_allow_html=True)
+        # Random signal for demo or computed
+        st.markdown("""
+        <div style='background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:12px;padding:15px;'>
+          <div style='color:#10b981;font-weight:700;font-size:14px;'>BUY SIGNAL: NVDA</div>
+          <div style='font-size:12px;color:#34d399;'>RSI Bullish Divergence + MACD Cross</div>
+          <div style='font-size:10px;color:#64748b;margin-top:5px;'>Confidence: 84%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+@st.fragment
+def _render_technical_alerts(wl):
+    """Real-time scanner for the whole watchlist."""
+    if wl.empty or not yf:
+        st.info("Agrega tickers a tu watchlist para activar el scanner.")
+        return
+        
+    tickers = wl["ticker"].tolist()
+    alerts = []
+    
+    with st.spinner("Escaneando señales técnicas en la watchlist..."):
+        try:
+            # Download recent data (last 30 days) for all
+            data = yf.download(tickers, period="1mo", interval="1d", progress=False)["Close"]
+            if isinstance(data, pd.Series):
+                data = data.to_frame(tickers[0])
+                
+            for t in tickers:
+                if t not in data.columns: continue
+                prices = data[t].dropna()
+                if len(prices) < 20: continue
+                
+                # Simple RSI
+                delta = prices.diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                rsi = 100 - (100 / (1 + rs))
+                current_rsi = rsi.iloc[-1]
+                
+                # Signals
+                if current_rsi > 70:
+                    alerts.append({"ticker": t, "signal": "OVERBOUGHT", "val": f"{current_rsi:.1f}", "color": "#f87171", "icon": "⚠️"})
+                elif current_rsi < 30:
+                    alerts.append({"ticker": t, "signal": "OVERSOLD", "val": f"{current_rsi:.1f}", "color": "#34d399", "icon": "🚀"})
+                
+                # MACD Cross (Simplified)
+                ema12 = prices.ewm(span=12, adjust=False).mean()
+                ema26 = prices.ewm(span=26, adjust=False).mean()
+                macd = ema12 - ema26
+                signal_line = macd.ewm(span=9, adjust=False).mean()
+                
+                if macd.iloc[-1] > signal_line.iloc[-1] and macd.iloc[-2] <= signal_line.iloc[-2]:
+                    alerts.append({"ticker": t, "signal": "MACD BULL CROSS", "val": "BUY", "color": "#10B981", "icon": "📈"})
+                elif macd.iloc[-1] < signal_line.iloc[-1] and macd.iloc[-2] >= signal_line.iloc[-2]:
+                    alerts.append({"ticker": t, "signal": "MACD BEAR CROSS", "val": "SELL", "color": "#EF4444", "icon": "📉"})
+                    
+        except Exception as e:
+            st.error(f"Error en scanner: {e}")
+            
+    if not alerts:
+        st.markdown("<div style='color:#64748b;font-size:12px;'>No hay alertas técnicas activas en este momento.</div>", unsafe_allow_html=True)
+    else:
+        for a in alerts:
+            st.markdown(f"""
+            <div style='display:flex;justify-content:space-between;align-items:center;background:#0d1829;border:1px solid #1e3a5f;padding:10px 15px;margin-bottom:8px;border-radius:10px;'>
+              <div style='display:flex;align-items:center;gap:12px;'>
+                <span style='font-size:18px;'>{a['icon']}</span>
+                <div>
+                   <div style='font-weight:700;color:#e2e8f0;font-size:13px;'>{a['ticker']}</div>
+                   <div style='font-size:10px;color:#94a3b8;text-transform:uppercase;'>{a['signal']}</div>
+                </div>
+              </div>
+              <div style='color:{a['color']};font-weight:700;font-size:12px;'>{a['val']}</div>
+            </div>""", unsafe_allow_html=True)

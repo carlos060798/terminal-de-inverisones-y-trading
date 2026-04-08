@@ -81,3 +81,25 @@ def cached_health_scores(ticker):
         return compute_health_scores(ticker)
     except Exception:
         return {}
+@st.cache_data(ttl=300, show_spinner=False)
+def get_batch_prices_and_changes(tickers_tuple):
+    """Batch-fetch 5d prices for current price + day change."""
+    _ZERO = {"price": 0, "prev": 0, "change_pct": 0}
+    try:
+        data = yf.download(list(tickers_tuple), period="5d", group_by="ticker", progress=False)
+        result = {}
+        for t in tickers_tuple:
+            try:
+                closes = (data["Close"] if len(tickers_tuple) == 1 else data[t]["Close"]).dropna()
+                if len(closes) >= 2:
+                    result[t] = {"price": float(closes.iloc[-1]), "prev": float(closes.iloc[-2]),
+                                 "change_pct": (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100}
+                elif len(closes) == 1:
+                    result[t] = {"price": float(closes.iloc[-1]), "prev": 0, "change_pct": 0}
+                else:
+                    result[t] = dict(_ZERO)
+            except Exception:
+                result[t] = dict(_ZERO)
+        return result
+    except Exception:
+        return {t: dict(_ZERO) for t in tickers_tuple}

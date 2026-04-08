@@ -17,42 +17,81 @@ class SecEdgarAdapter(BaseDataAdapter):
 
     def _fetch_raw(self, ticker: str = "AAPL", form_type: str = "10-K", year: int = None, **kwargs):
         """Fetch real financial statements using edgartools."""
-        company = Company(ticker)
-        filings = company.get_filings(form=form_type)
-        
-        if not filings:
-            return None
-            
-        latest_filing = filings.latest()
-        # In edgartools, .obj() on a filing returns the Financials object for XBRL filings
-        financials = latest_filing.obj()
-        
-        # Extract sheets if available
-        data = {
-            "ticker": ticker,
-            "form": form_type,
-            "filed_at": latest_filing.filing_date,
-            "accession_number": latest_filing.accession_number,
-        }
-        
         try:
-            # We try to get the balance sheet and income statement
-            if financials:
-                # edgartools Financials object attributes
-                balance_sheet = financials.balance_sheet
-                income_statement = financials.income_statement
-                cash_flow = financials.cash_flow
-                
-                if balance_sheet is not None:
-                    data["balance_sheet"] = balance_sheet.to_dataframe()
-                if income_statement is not None:
-                    data["income_statement"] = income_statement.to_dataframe()
-                if cash_flow is not None:
-                    data["cash_flow"] = cash_flow.to_dataframe()
-        except Exception as e:
-            data["error_extracting_financials"] = str(e)
+            company = Company(ticker)
+            filings = company.get_filings(form=form_type)
             
-        return data
+            if not filings:
+                return None
+                
+            latest_filing = filings.latest()
+            financials = latest_filing.obj()
+            
+            # Extract metrics from financials
+            data = {
+                "ticker": ticker,
+                "form": form_type,
+                "filed_at": latest_filing.filing_date,
+                "accession_number": latest_filing.accession_number,
+                "revenue": 0.0,
+                "net_income": 0.0,
+                "total_assets": 0.0,
+                "total_liabilities": 0.0,
+                "total_equity": 0.0,
+                "eps": 0.0,
+                "dividend_paid": 0.0,
+                "operating_cash_flow": 0.0,
+                "shares_outstanding": 0,
+            }
+            
+            if financials:
+                try:
+                    # Extracts text for RAG (Item 1A, Item 7, etc or full)
+                    # latest_filing has a .html() and .text() method
+                    data["full_text"] = latest_filing.text()
+
+                    # In edgartools v2.x, financials are accessed via financial_statements
+                    # balance_sheet, income_statement, etc are dataframes themselves or have .to_pandas()
+                    bs = financials.balance_sheet
+                    is_ = financials.income_statement
+                    cf = financials.cash_flow
+                    
+                    if bs is not None:
+                        df_bs = bs.to_pandas() if hasattr(bs, "to_pandas") else bs
+                        data["balance_sheet_raw"] = df_bs
+                        # Simple extraction logic (heuristic)
+                        for idx, row in df_bs.iterrows():
+                            lbl = str(idx).lower()
+                            val = row.iloc[0] if len(row) > 0 else 0
+                            if "total assets" in lbl: data["total_assets"] = val
+                            if "total liabilities" in lbl: data["total_liabilities"] = val
+                            if "total stockholders' equity" in lbl: data["total_equity"] = val
+
+                    if is_ is not None:
+                        df_is = is_.to_pandas() if hasattr(is_, "to_pandas") else is_
+                        data["income_statement_raw"] = df_is
+                        for idx, row in df_is.iterrows():
+                            lbl = str(idx).lower()
+                            val = row.iloc[0] if len(row) > 0 else 0
+                            if "revenue" in lbl or "sales" in lbl: data["revenue"] = val
+                            if "net income" in lbl: data["net_income"] = val
+                            if "earnings per share" in lbl and "diluted" in lbl: data["eps"] = val
+
+                    if cf is not None:
+                        df_cf = cf.to_pandas() if hasattr(cf, "to_pandas") else cf
+                        data["cash_flow_raw"] = df_cf
+                        for idx, row in df_cf.iterrows():
+                            lbl = str(idx).lower()
+                            val = row.iloc[0] if len(row) > 0 else 0
+                            if "operating activities" in lbl and "net cash" in lbl: data["operating_cash_flow"] = val
+
+                except Exception as e:
+                    data["extraction_error"] = str(e)
+            
+            return data
+        except Exception as e:
+            print(f"Error fetching SEC data for {ticker}: {e}")
+            return None
 
     def _normalize(self, raw) -> DataResult:
         if raw is None:

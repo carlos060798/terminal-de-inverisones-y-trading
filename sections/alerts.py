@@ -28,7 +28,23 @@ def _check_alerts(alerts_df: pd.DataFrame) -> list:
     """Check active (non-triggered) alerts against live prices.
     Returns list of dicts with alert info + current price for triggered ones."""
     triggered = []
+    # Time check for sessions (Colombia COT, UTC-5)
+    now_hour = datetime.now().hour
+    
+    def _is_in_session(session_name, hour):
+        if session_name == "Any": return True
+        if session_name == "Londres" and 3 <= hour < 8: return True
+        if session_name == "Nueva York" and 8 <= hour < 16: return True
+        if session_name == "Tokio" and (20 <= hour <= 23 or hour == 0): return True
+        return False
+
     active = alerts_df[alerts_df["triggered"] == 0]
+    if active.empty:
+        return triggered
+
+    active["in_session"] = active["session"].apply(lambda s: _is_in_session(s, now_hour))
+    active = active[active["in_session"]]
+    
     if active.empty:
         return triggered
 
@@ -99,15 +115,23 @@ def render():
                     "Precio umbral ($)", min_value=0.01, value=100.0,
                     step=1.0, key="alert_threshold_input",
                 )
-            submitted = st.form_submit_button("Crear Alerta", type="primary")
+            
+            ac4, _ = st.columns([1, 2])
+            with ac4:
+                alert_sess = st.selectbox(
+                    "Sesión Activa", ["Any", "Londres", "Nueva York", "Tokio"],
+                    index=0, key="alert_session_input"
+                )
+                
+            submitted = st.form_submit_button("Crear Alerta", type="primary", use_container_width=True)
             if submitted:
                 if alert_ticker.strip():
                     try:
-                        db.add_alert(alert_ticker.strip(), alert_dir, alert_threshold)
+                        db.add_alert(alert_ticker.strip().upper(), alert_dir, alert_threshold, alert_sess)
                         st.success(
                             f"Alerta creada: {alert_ticker.strip().upper()} "
                             f"{'por encima de' if alert_dir == 'above' else 'por debajo de'} "
-                            f"${alert_threshold:,.2f}"
+                            f"${alert_threshold:,.2f} [Sesión: {alert_sess}]"
                         )
                         st.rerun()
                     except Exception as e:
@@ -214,9 +238,10 @@ def render():
                 "triggered_at": "Activada en",
             }, inplace=True)
 
-            show_cols = ["id", "Ticker", "Dirección", "Umbral", "Estado", "Creada", "Activada en"]
+            show_cols = ["id", "Ticker", "Dirección", "Umbral", "session", "Estado", "Creada"]
             available_cols = [c for c in show_cols if c in display.columns]
             df_show = display[available_cols]
+            df_show.rename(columns={"session": "Sesión"}, inplace=True)
 
             def state_color(v):
                 if v == "Activada":

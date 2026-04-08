@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta
 from ui_shared import DARK, dark_layout, fmt, kpi
 import ai_engine
+import database as db
 
 # Try FRED
 try:
@@ -169,8 +170,16 @@ def _render_economic_calendar(fred):
     """Render the Economic Calendar tab with upcoming macro events."""
     from datetime import datetime, timedelta
 
-    st.markdown("### Calendario Econ\u00f3mico 2026")
-    st.markdown("Eventos macro que mueven los mercados")
+    st.markdown("### Calendario Económico")
+    
+    with st.expander("📊 Ver Calendario en Tiempo Real (Investing.com)", expanded=True):
+        st.components.v1.html("""
+            <iframe src="https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=2,3&features=datepicker,timezone&countries=5&calType=week&timeZone=58&lang=1" 
+            width="100%" height="800" frameborder="0" allowtransparency="true" marginwidth="0" marginheight="0"></iframe>
+        """, height=820)
+
+    st.markdown("---")
+    st.markdown("#### Programación de Eventos Clave 2026")
 
     today = datetime.now().date()
     week_end = today + timedelta(days=7)
@@ -306,7 +315,69 @@ def render():
           y agrégala en <code>.streamlit/secrets.toml</code>
         </div>""", unsafe_allow_html=True)
 
-    tab_yield, tab_macro, tab_vix, tab_fx, tab_cal = st.tabs(["📈 Yield Curve", "📊 Indicadores Macro", "😰 VIX & Sentimiento", "💱 Monitor de Divisas", "📅 Calendario Económico"])
+    tab_cmv, tab_yield, tab_macro, tab_global, tab_vix, tab_fx, tab_cal = st.tabs([
+        "🎯 CMV Score", "📈 Yield Curve", "📊 Indicadores Macro", "🌍 Contexto Global (WB)", 
+        "😰 VIX & Sentimiento", "💱 Monitor de Divisas", "📅 Calendario Económico"
+    ])
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 0: CMV SCORE (VALORACIÓN AGREGADA)
+    # ══════════════════════════════════════════════════════════════
+    with tab_cmv:
+        import services.macro_indicators as macro_indicators
+        
+        with st.spinner("Compilando Modelo CMV Aggregate..."):
+            cmv_data = macro_indicators.get_cmv_indicators()
+            
+        if cmv_data:
+            # Aggregate Index = Mean of Z-scores
+            z_vals = [v['z'] for v in cmv_data.values()]
+            agg_z = sum(z_vals) / len(z_vals) if z_vals else 0
+            agg_label, agg_color, agg_icon = macro_indicators.get_rating_from_z(agg_z)
+            
+            # Header Gauge
+            st.markdown(f"""
+            <div style='background:rgba({int(agg_color[1:3],16)},{int(agg_color[3:5],16)},{int(agg_color[5:7],16)},0.08);
+                        border:1px solid {agg_color}30; border-radius:15px; padding:25px; margin-bottom:25px; text-align:center;'>
+                <div style='font-size:12px; color:#94a3b8; text-transform:uppercase; letter-spacing:1.5px;'>CMV Aggregate Market Value Index</div>
+                <div style='font-size:42px; font-weight:900; color:{agg_color}; margin:10px 0;'>{agg_z:+.2f}σ</div>
+                <div style='font-size:18px; font-weight:700; color:white;'>{agg_icon} {agg_label}</div>
+                <div style='font-size:12px; color:#64748b; margin-top:10px;'>Promedio de desviación estándar de 14 indicadores fundamentales</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Grid of Indicators
+            st.markdown("<div style='margin-bottom:15px; font-weight:600; color:#94a3b8;'>Componentes del Modelo</div>", unsafe_allow_html=True)
+            
+            rows = [list(cmv_data.keys())[i:i+4] for i in range(0, len(cmv_data), 4)]
+            for row_keys in rows:
+                cols = st.columns(4)
+                for i, k in enumerate(row_keys):
+                    data = cmv_data[k]
+                    z = data['z']
+                    val = data['val']
+                    unit = data['unit']
+                    label, color, icon = macro_indicators.get_rating_from_z(z)
+                    
+                    with cols[i]:
+                        st.markdown(f"""
+                        <div style='background:#0a0a0a; border:1px solid #1a1a1a; border-radius:10px; padding:15px; height:140px;'>
+                            <div style='font-size:10px; color:#64748b; text-transform:uppercase; margin-bottom:5px;'>{k}</div>
+                            <div style='font-size:18px; font-weight:700; color:white;'>{val:.1f}{unit}</div>
+                            <div style='font-size:12px; font-weight:600; color:{color}; margin-top:8px;'>{z:+.1f}σ {icon}</div>
+                            <div style='font-size:9px; color:#475569; margin-top:4px;'>{label}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.markdown("""
+            <div style='color:#64748b; font-size:11px;'>
+                Metodología basada en Current Market Valuation (CMV). Los indicadores se miden por su desviación estándar (σ) 
+                respecto a su tendencia histórica de 20 años. Los datos se actualizan semanalmente vía FRED y yfinance.
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.error("No se pudieron cargar los indicadores CMV.")
 
     # ══════════════════════════════════════════════════════════════
     # TAB 1: YIELD CURVE
@@ -438,6 +509,51 @@ def render():
             FRED_API_KEY = "tu_key_aqui"
             ```
             """)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB: CONTEXTO GLOBAL (WORLD BANK)
+    # ══════════════════════════════════════════════════════════════
+    with tab_global:
+        st.markdown("### 🌍 Panorama Económico Global (World Bank)")
+        st.markdown("<div style='color:#94a3b8; font-size:13px; margin-bottom:15px;'>"
+                   "Comparativa de indicadores estructurales de las principales potencias mundiales. "
+                   "Datos de baja frecuencia (Anual/Trimestral) sincronizados periódicamente.</div>", unsafe_allow_html=True)
+        
+        try:
+            m_df = db.get_macro_metrics()
+            if not m_df.empty:
+                indicators = sorted(m_df['indicator'].unique().tolist())
+                sel_ind = st.selectbox("Seleccionar Indicador", indicators, key="wb_ind_sel")
+                
+                filtered_wb = m_df[m_df['indicator'] == sel_ind]
+                if not filtered_wb.empty:
+                    latest_year = filtered_wb['year'].max()
+                    latest_data = filtered_wb[filtered_wb['year'] == latest_year].sort_values('value', ascending=False)
+                    
+                    fig_wb = go.Figure(go.Bar(
+                        x=latest_data['country'],
+                        y=latest_data['value'],
+                        marker_color='#60a5fa',
+                        text=latest_data['value'].apply(lambda x: f"{x:.1f}%"),
+                        textposition='auto',
+                    ))
+                    fig_wb.update_layout(**DARK, height=350, margin=dict(l=0, r=0, t=30, b=0),
+                                        title=dict(text=f"{sel_ind} (% Anual) - Año {latest_year}", 
+                                                  font=dict(size=14, color="#94a3b8")))
+                    st.plotly_chart(fig_wb, use_container_width=True)
+                    
+                    with st.expander("📊 Ver Histórico por Países"):
+                        pivot_wb = filtered_wb.pivot(index='year', columns='country', values='value').sort_index(ascending=False)
+                        st.dataframe(pivot_wb.style.format("{:.2f}%"), use_container_width=True)
+            else:
+                st.info("No hay datos globales sincronizados. Esperando al próximo ciclo de tareas...")
+                if st.button("Lanzar Ingesta Macro WB Ahora"):
+                    from services.data_ingestion.macro_service import sync_worldbank_macro
+                    with st.spinner("Descargando datos macro globales..."):
+                        if sync_worldbank_macro():
+                            st.rerun()
+        except Exception as e:
+            st.error(f"Error cargando datos macro globales: {e}")
 
     # ══════════════════════════════════════════════════════════════
     # TAB 3: VIX & SENTIMIENTO

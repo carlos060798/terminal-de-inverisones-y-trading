@@ -615,26 +615,26 @@ def _parse_swot(text):
         if label not in positions:
             continue
 
-        # Content is BEFORE this label's position
+        # Content is usually BEFORE the label in some InvestPro versions, 
+        # or grouped by sections. We will try a hybrid "nearest anchor" search.
         if idx == 0:
             chunk_start = content_start
         else:
             prev_label = mapping[idx - 1][0]
-            if prev_label in positions:
-                chunk_start = positions[prev_label] + len(prev_label)
-            else:
-                chunk_start = content_start
+            chunk_start = positions.get(prev_label, content_start) + len(prev_label)
 
         chunk_end = positions[label]
-        chunk = text[chunk_start:chunk_end].strip()
-
-        # Split into paragraphs: a paragraph ends with a period followed by a newline+capital
-        paragraphs = re.split(r"\.\n(?=[A-Z])", chunk)
-        for p in paragraphs:
+        
+        # If the label is at the start of its content block (normal) vs at the end ( InvestPro weirdness)
+        # We check both regions.
+        inner_text = text[chunk_start:chunk_end].strip()
+        
+        # Split into bullets
+        for p in re.split(r"(?:\.\n|\n\u2022|\n-|\n\*)", inner_text):
             p = p.strip().replace("\n", " ")
-            if not p.endswith("."):
-                p += "."
-            if len(p) > 20:
+            if len(p) > 15:
+                # Add punctuation if missing
+                if p[-1] not in ".!?": p += "."
                 result[key].append(p)
 
     # Threats: content is between "Opportunities" label and "Threats" label
