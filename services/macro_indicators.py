@@ -130,6 +130,38 @@ def get_cmv_indicators():
     if "Mean Reversion" not in results:
         results["Mean Reversion"] = {"z": 2.1, "val": 5840, "unit": "pts"}
 
+    # --- BLOQUE 3: MACROECONOMÍA ---
+    if fred:
+        # Inflation (CPI)
+        try:
+            cpi = fred.get_series("CPIAUCSL", observation_start="2010-01-01")
+            cpi_yoy = cpi.pct_change(12) * 100
+            z, _, _, cur = compute_z_score(cpi_yoy)
+            results["Inflation (CPI)"] = {"z": -z, "val": cur, "unit": "%"}
+        except: pass
+        
+        # Unemployment (UNRATE)
+        try:
+            unrate = fred.get_series("UNRATE", observation_start="2010-01-01")
+            z, _, _, cur = compute_z_score(unrate)
+            results["Unemployment"] = {"z": z, "val": cur, "unit": "%"}
+        except: pass
+
+        # Oil WTI
+        try:
+            oil = fred.get_series("DCOILWTICO", observation_start="2010-01-01")
+            z, _, _, cur = compute_z_score(oil)
+            results["Oil WTI"] = {"z": -z, "val": cur, "unit": "$"}
+        except: pass
+
+        # M2 Money Supply
+        try:
+            m2 = fred.get_series("M2SL", observation_start="2010-01-01")
+            m2_growth = m2.pct_change(12) * 100
+            z, _, _, cur = compute_z_score(m2_growth)
+            results["M2 Growth"] = {"z": z, "val": cur, "unit": "%"}
+        except: pass
+
     return results
 
 def get_rating_from_z(z):

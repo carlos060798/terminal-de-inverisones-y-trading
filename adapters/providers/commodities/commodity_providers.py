@@ -14,7 +14,7 @@ from adapters.registry import register
 class EiaAdapter(RestMixin, BaseDataAdapter):
     config = ProviderConfig(
         provider_id="eia", category="commodities",
-        credential_key="EIA_KEY",
+        credential_key="EIA_API_KEY",
         base_url="https://api.eia.gov/v2",
         rate_limit_rpm=30, ttl_seconds=3600, priority="medium",
     )

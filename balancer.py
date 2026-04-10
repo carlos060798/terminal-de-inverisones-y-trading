@@ -21,6 +21,7 @@ PROVIDERS = {
     "hf-qwen-vl": {"backend": "hf", "model": "Qwen/Qwen2.5-VL-7B-Instruct", "vision": True, "daily_limit": 5000, "name": "Qwen VL 7B"},
     "hf-florence": {"backend": "hf", "model": "microsoft/Florence-2-large", "vision": True, "daily_limit": 5000, "name": "Florence-2"},
     "hf-finbert": {"backend": "hf", "model": "ProsusAI/finbert", "vision": False, "daily_limit": 10000, "name": "FinBERT"},
+    "local-llama": {"backend": "local", "model": "llama3.2", "vision": False, "daily_limit": 999999, "name": "Local Llama (Ollama)"},
 }
 
 # Map backend names to the API key each one requires
@@ -31,6 +32,7 @@ _BACKEND_KEYS = {
     "deepseek": "DEEPSEEK_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "hf": "HF_TOKEN",
+    "local": None,
 }
 
 
@@ -108,9 +110,9 @@ def is_available(provider_id: str) -> bool:
     info = PROVIDERS.get(provider_id)
     if info is None:
         return False
-    key_name = _BACKEND_KEYS.get(info["backend"])
+    key_name = _BACKEND_KEYS.get(info["backend"], "MISSING_KEY")
     if key_name is None:
-        return False
+        return True # Local backends always 'available' if chosen
     return bool(_get_secret(key_name))
 
 

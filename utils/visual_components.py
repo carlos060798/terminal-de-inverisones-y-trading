@@ -2,72 +2,11 @@ import streamlit as st
 import plotly.graph_objects as go
 
 def inject_custom_css():
-    """Inyecta el CSS base para el diseño de tarjetas oscuras y profesional."""
-    st.markdown("""
-    <style>
-    /* Estilo de Tarjetas */
-    .stCard {
-        background-color: #121212;
-        border: 1px solid #2d2d2d;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 15px;
-        transition: transform 0.2s;
-    }
-    .stCard:hover {
-        border-color: #3b82f6;
-    }
-    
-    /* Títulos y Subtítulos */
-    .card-title {
-        font-size: 14px;
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 5px;
-    }
-    .card-value {
-        font-size: 24px;
-        font-weight: 700;
-        color: white;
-    }
-    .card-subtitle {
-        font-size: 12px;
-        color: #64748b;
-    }
-    
-    /* Barra de Salud (1-5) */
-    .health-bar-container {
-        display: flex;
-        gap: 4px;
-        margin-top: 10px;
-    }
-    .health-segment {
-        flex: 1;
-        height: 8px;
-        border-radius: 2px;
-        background-color: #1e293b;
-    }
-    .health-active-1 { background-color: #ef4444; } /* Rojo */
-    .health-active-2 { background-color: #f59e0b; } /* Naranja */
-    .health-active-3 { background-color: #eab308; } /* Amarillo */
-    .health-active-4 { background-color: #84cc16; } /* Verde Lima */
-    .health-active-5 { background-color: #10b981; } /* Verde */
-    
-    /* Grid Layout */
-    .dashboard-grid {
-        display: grid;
-        grid-template-columns: 3fr 2fr;
-        gap: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    """Vaciado: Los estilos se cargan ahora desde assets/styles.css para mayor performance."""
+    pass
 
-def render_health_bar(score):
-    """
-    Dibuja una barra de salud segmentada de 1 a 5.
-    Score: int de 1 a 5.
-    """
+def render_health_bar(score, title="Salud de la empresa"):
+    """Dibuja una barra de salud segmentada de 1 a 5."""
     segments = ""
     for i in range(1, 6):
         active_class = f"health-active-{score}" if i <= score else ""
@@ -75,11 +14,11 @@ def render_health_bar(score):
     
     st.markdown(f"""
     <div style="margin-top:20px;">
-        <div class="card-title">Salud de la empresa</div>
+        <div class="kpi-label">{title}</div>
         <div class="health-bar-container">
             {segments}
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:5px; font-size:10px; color:#64748b;">
+        <div style="display:flex; justify-content:space-between; margin-top:5px; font-size:10px; color:#5a6f8a;">
             <span>DÉBIL</span>
             <span>EXCELENTE</span>
         </div>
@@ -93,35 +32,75 @@ def render_range_slider(current, min_val, max_val, label="Rango 52 semanas"):
     
     st.markdown(f"""
     <div style="margin-bottom:15px;">
-        <div class="card-title">{label}</div>
+        <div class="kpi-label">{label}</div>
         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-            <span style="color:#64748b; font-size:12px;">{min_val:.2f}</span>
-            <span style="color:white; font-size:12px; font-weight:700;">{current:.2f}</span>
-            <span style="color:#64748b; font-size:12px;">{max_val:.2f}</span>
+            <span style="color:#5a6f8a; font-size:12px;">{min_val:,.2f}</span>
+            <span style="color:#ffffff; font-size:12px; font-weight:700;">{current:,.2f}</span>
+            <span style="color:#5a6f8a; font-size:12px;">{max_val:,.2f}</span>
         </div>
-        <div style="height:4px; background:#1e293b; border-radius:2px; position:relative;">
-            <div style="position:absolute; left:{pct}%; top:-3px; width:10px; height:10px; background:#3b82f6; border-radius:50%; border:2px solid #121212;"></div>
+        <div style="height:4px; background:rgba(255,255,255,0.05); border-radius:2px; position:relative;">
+            <div style="position:absolute; left:{pct}%; top:-3px; width:10px; height:10px; background:#3b82f6; border-radius:50%; border:2px solid #0f172a;"></div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 def render_metric_card(title, value, subtitle="", delta=None):
-    """Dibuja una tarjeta de métrica estilo dashboard."""
+    """Dibuja una tarjeta de métrica estilo dashboard institucional."""
     delta_html = ""
-    if delta:
+    if delta is not None:
         color = "#10b981" if delta > 0 else "#ef4444"
         icon = "↑" if delta > 0 else "↓"
-        delta_html = f'<span style="color:{color}; font-size:12px; margin-left:5px;">{icon} {abs(delta):.1f}%</span>'
+        delta_html = f'<span style="color:{color}; font-size:12px; margin-left:8px; font-weight:600;">{icon} {abs(delta):.1f}%</span>'
     
     st.markdown(f"""
-    <div class="stCard">
-        <div class="card-title">{title}</div>
-        <div class="card-value">{value}{delta_html}</div>
-        <div class="card-subtitle">{subtitle}</div>
+    <div class="metric-card">
+        <div class="mc-label">{title}</div>
+        <div class="mc-value">{value}{delta_html}</div>
+        <div class="mc-bench" style="color:#5a6f8a;">{subtitle}</div>
     </div>
     """, unsafe_allow_html=True)
 
-def render_sparkline(data, height=30, width=100):
+def render_signal_badge(level, label=None):
+    """
+    Dibuja un badge de señal técnica (Compra/Venta/Mantener).
+    level: float/int de -5 (Extrema Venta) a 5 (Extrema Compra).
+    """
+    if label is None:
+        if level > 2: label = "Compra Fuerte"
+        elif level > 0.5: label = "Compra"
+        elif level < -2: label = "Venta Fuerte"
+        elif level < -0.5: label = "Venta"
+        else: label = "Mantener"
+    
+    css_class = "signal-hold"
+    if level > 0.5: css_class = "signal-buy"
+    elif level < -0.5: css_class = "signal-sell"
+    
+    st.markdown(f'<div class="signal-badge {css_class}">{label}</div>', unsafe_allow_html=True)
+
+def render_insight_box(text, type="info"):
+    """Dibuja una caja de insight/nota contextual."""
+    if type == "info":
+        st.info(text)
+    elif type == "success":
+        st.success(text)
+    elif type == "warning":
+        st.warning(text)
+    else:
+        st.error(text)
+
+def render_chart_container(fig, height=300):
+    """Envuelve un gráfico Plotly en un contenedor con el estilo corporativo."""
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color="#f1f5f9", family="Inter"),
+        margin=dict(l=10, r=10, t=10, b=10),
+        height=height
+    )
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+def render_sparkline(data, height=30, width=100, color='#3b82f6'):
     """Genera un sparkline (mini gráfico) usando Plotly."""
     if not data or len(data) < 2:
         return None
@@ -130,9 +109,9 @@ def render_sparkline(data, height=30, width=100):
     fig.add_trace(go.Scatter(
         y=data,
         mode='lines',
-        line=dict(color='#3b82f6', width=2),
+        line=dict(color=color, width=2),
         fill='tozeroy',
-        fillcolor='rgba(59, 130, 246, 0.1)'
+        fillcolor=f'rgba{tuple(list(int(color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4)) + [0.1])}'
     ))
     
     fig.update_layout(
@@ -168,9 +147,8 @@ def render_price_history(df):
         height=280,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, color='#3e5068', tickfont=dict(size=10)),
-        yaxis=dict(showgrid=True, gridcolor='#1e293b', color='#3e5068', tickfont=dict(size=10), side="right"),
+        xaxis=dict(showgrid=False, color='#5a6f8a', tickfont=dict(size=10)),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#5a6f8a', tickfont=dict(size=10), side="right"),
         showlegend=False
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-

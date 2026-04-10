@@ -84,17 +84,21 @@ def _build_prompt(asset, timeframe="", analysis_type="Tecnico Completo",
 def analyze_chart(image_bytes, asset, timeframe="",
                   analysis_type="Tecnico Completo", mime="image/png",
                   patterns_text=""):
-    """Analyze a chart image using the vision provider chain.
-
-    Returns
-    -------
-    tuple[str, str]
-        (analysis_text, provider_id_used)
-    """
+    """Analyze a chart image using the vision provider chain, or a forced provider if set."""
+    import streamlit as st
     prompt = _build_prompt(asset, timeframe, analysis_type, patterns_text)
 
+    # ── AI BYPASS LOGIC ──────────────────────────────────────────────────────
+    forced_id = st.session_state.get("force_llm", "Auto-Balanceador")
+    active_chain = VISION_CHAIN
+    
+    if forced_id != "Auto-Balanceador" and forced_id in PROVIDERS:
+        # Solo forzar si el modelo elegido soporta vision
+        if PROVIDERS[forced_id].get("vision"):
+            active_chain = [forced_id] + [p for p in VISION_CHAIN if p != forced_id]
+
     errors = []
-    for pid in VISION_CHAIN:
+    for pid in active_chain:
         provider = PROVIDERS.get(pid)
         if not provider or not provider.get("vision"):
             continue

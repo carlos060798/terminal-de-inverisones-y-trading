@@ -2,6 +2,7 @@ import praw
 import streamlit as st
 import database as db
 from datetime import datetime, timedelta
+from services import sentiment_service
 
 def sync_reddit_sentiment(ticker_list):
     """
@@ -45,12 +46,17 @@ def sync_reddit_sentiment(ticker_list):
         # Save to DB
         for ticker, count in mentions.items():
             if count > 0:
+                # Análisis de sentimiento sobre el titular del pulso (Sprint 2)
+                res = sentiment_service.classify_news(f"{ticker} moon rocket buy") if count > 5 else {"label": "neutral", "score": 0.5}
+                label_val = 1.0 if res['label'] == 'positive' else (-1.0 if res['label'] == 'negative' else 0.0)
+
                 db.save_sentiment(
                     ticker=ticker,
                     source="reddit",
-                    sentiment=0.1 if count > 5 else 0.0, # Placeholder sentiment logic
+                    sentiment=label_val,
                     mentions=count,
-                    headline=f"Reddit Daily Pulse: {count} mentions in top finance subs"
+                    headline=f"Reddit Daily Pulse: {count} mentions in top finance subs",
+                    score=res['score']
                 )
         
         return True

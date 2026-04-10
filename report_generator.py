@@ -30,26 +30,27 @@ class InvestmentReport(FPDF):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(150, 150, 150)
-        self.cell(0, 10, f"Pagina {self.page_no()}/{{nb}}", align="C")
+        self.cell(0, 10, f"Quantum Terminal - Confidencial | Pagina {self.page_no()}/{{nb}}", align="C")
 
     # ── Helpers ──
 
     def section_title(self, title: str):
-        self.ln(4)
-        self.set_font("Helvetica", "B", 13)
-        self.set_text_color(0, 100, 180)
-        self.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
-        self.set_draw_color(0, 100, 180)
+        self.ln(6)
+        self.set_font("Helvetica", "B", 14)
+        self.set_text_color(0, 51, 102) # Navy Blue
+        self.cell(0, 10, title.upper(), new_x="LMARGIN", new_y="NEXT")
+        self.set_draw_color(0, 51, 102)
+        self.set_line_width(0.8)
         self.line(10, self.get_y(), 200, self.get_y())
-        self.ln(3)
+        self.ln(4)
 
     def kv_row(self, label: str, value, bold_value: bool = False):
-        self.set_font("Helvetica", "", 10)
-        self.set_text_color(60, 60, 60)
-        self.cell(70, 7, label)
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(80, 80, 80)
+        self.cell(80, 7, label + ":")
         style = "B" if bold_value else ""
         self.set_font("Helvetica", style, 10)
-        self.set_text_color(20, 20, 20)
+        self.set_text_color(0, 0, 0)
         self.cell(0, 7, str(value) if value is not None else "N/A",
                   new_x="LMARGIN", new_y="NEXT")
 
@@ -375,18 +376,29 @@ def generate_report(ticker: str, parsed_data: dict = None,
             pdf.cell(190, 12, f"VEREDICTO: {verdict.upper()}", align="C",
                      fill=True, new_x="LMARGIN", new_y="NEXT")
 
+    # ── SURVEILLANCE & SMART MONEY ──
+    pdf.section_title("Vigilancia Institucional (Smart Money)")
+    if advanced and advanced.get("insiders"):
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 7, "Movimientos Recientes de Insiders:", new_x="LMARGIN", new_y="NEXT")
+        insiders = advanced["insiders"].head(10)
+        i_rows = []
+        for _, row in insiders.iterrows():
+            i_rows.append([str(row.get('officer_name', 'N/A')), str(row.get('type', 'N/A')), str(row.get('shares', 'N/A'))])
+        pdf.table(["Persona", "Operacion", "Acciones"], i_rows, [80, 50, 60])
+    
     # ── PRO TIPS ──
     if parsed_data:
         tips = parsed_data.get("pro_tips", [])
         if tips:
-            pdf.section_title("Pro Tips")
+            pdf.section_title("Pro Tips & Señales IA")
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(40, 40, 40)
             for tip in tips[:10]:
                 if pdf.get_y() > 265:
                     pdf.add_page()
                 text = str(tip).encode("latin-1", "xmlcharrefreplace").decode("latin-1")
-                pdf.multi_cell(180, 5, f"  {text}")
+                pdf.multi_cell(180, 5, f"  [SIGNAL] {text}")
                 pdf.ln(1)
 
     # Output

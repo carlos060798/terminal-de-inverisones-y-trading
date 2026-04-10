@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import database as db
 from ui_shared import DARK, dark_layout, fmt, kpi
 import excel_export, ai_engine
+from utils import visual_components as vc
 
 try:
     import yfinance as yf
@@ -175,29 +176,27 @@ def render():
     k1, k2, k3, k4, k5, k6 = st.columns(6)
 
     pct_total = (total_pnl / total_inv * 100) if total_inv > 0 else 0
-
-    k1.markdown(kpi("Portfolio Value", fmt(total_val) if total_val > 0 else "$0",
-                     f"{n_positions} positions", "blue"), unsafe_allow_html=True)
-
-    pnl_color = "green" if total_pnl >= 0 else "red"
-    k2.markdown(kpi("P&L Total", fmt(total_pnl),
-                     f"{pct_total:+.2f}%", pnl_color), unsafe_allow_html=True)
-
-    k3.markdown(kpi("Trading P&L", f"${total_trading_pnl:+,.0f}",
-                     f"Stocks: ${stock_pnl:+,.0f} | FX: ${fx_pnl:+,.0f}",
-                     "green" if total_trading_pnl >= 0 else "red"), unsafe_allow_html=True)
-
-    k4.markdown(kpi("Win Rate", f"{win_rate:.1f}%",
-                     f"{len(all_closed)} closed trades",
-                     "green" if win_rate >= 50 else "red"), unsafe_allow_html=True)
-
-    k5.markdown(kpi("Sharpe Ratio", f"{sharpe:.2f}",
-                     "return / risk",
-                     "green" if sharpe > 0 else "red"), unsafe_allow_html=True)
-
-    k6.markdown(kpi("VaR 95%", f"${var_95:,.2f}" if len(returns) >= 2 else "N/A",
-                     "max probable loss",
-                     "red" if var_95 < 0 else "blue"), unsafe_allow_html=True)
+    with k1:
+        vc.render_metric_card("Portfolio Value", fmt(total_val) if total_val > 0 else "$0", subtitle=f"{n_positions} positions")
+    k2.empty()
+    with k2:
+        vc.render_metric_card("P&L Total", fmt(total_pnl), subtitle=f"{pct_total:+.2f}%", delta=pct_total)
+    
+    k3.empty()
+    with k3:
+        vc.render_metric_card("Trading P&L", f"${total_trading_pnl:+,.0f}", subtitle=f"Stocks: ${stock_pnl:+,.0f} | FX: ${fx_pnl:+,.0f}")
+    
+    k4.empty()
+    with k4:
+        vc.render_metric_card("Win Rate", f"{win_rate:.1f}%", subtitle=f"{len(all_closed)} closed trades")
+    
+    k5.empty()
+    with k5:
+        vc.render_metric_card("Sharpe Ratio", f"{sharpe:.2f}", subtitle="return / risk")
+    
+    k6.empty()
+    with k6:
+        vc.render_metric_card("VaR 95%", f"${var_95:,.2f}" if len(returns) >= 2 else "N/A", subtitle="max probable loss")
 
     # ── Portfolio Heatmap (Treemap) ──
     if position_rows:
@@ -292,6 +291,31 @@ def render():
             st.info(f"Market pulse unavailable: {e}")
 
     _render_market_pulse()
+    
+    # ── Global Market Heatmap (Finviz) ──
+    _sec("Global Market Heatmap (S&P 500)")
+    st.components.v1.html("""
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js" async>
+      {
+          "exchanges": [],
+          "dataSource": "S&P500",
+          "grouping": "sector",
+          "blockSize": "market_cap_basic",
+          "blockColor": "change",
+          "locale": "en",
+          "symbolUrl": "",
+          "colorTheme": "dark",
+          "hasTopBar": false,
+          "isDatasetEnabled": false,
+          "isTransparent": true,
+          "width": "100%",
+          "height": "100%"
+      }
+      </script>
+    </div>
+    """, height=600)
 
     # ── Sentiment Thermometer (VADER + RSS) ──
     @st.fragment(run_every=900)

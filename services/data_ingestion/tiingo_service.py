@@ -1,6 +1,7 @@
 import requests
 import streamlit as st
 import database as db
+from services import sentiment_service
 
 def sync_tiingo_news(ticker):
     """
@@ -21,14 +22,18 @@ def sync_tiingo_news(ticker):
         if response.status_code == 200:
             news_items = response.json()
             for item in news_items:
-                # Some items include 'crawlDate', 'source', 'title', 'url', 'description'
+                headline = item.get('title', '')
+                # Clasificación usando motor local (Sprint 2)
+                res = sentiment_service.classify_news(headline)
+                label_val = 1.0 if res['label'] == 'positive' else (-1.0 if res['label'] == 'negative' else 0.0)
+                
                 db.save_sentiment(
                     ticker=ticker.upper(),
                     source="tiingo",
-                    sentiment=0.0, # Tiingo doesn't always provide a native sentiment score in the basic feed
-                    headline=item.get('title', ''),
+                    sentiment=label_val,
+                    headline=headline,
                     url=item.get('url', ''),
-                    score=0.0 # Placeholder
+                    score=res['score']
                 )
             return True
         else:

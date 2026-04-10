@@ -5,6 +5,9 @@ Quick scan stocks by fundamental filters using yfinance & Finviz
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import numpy as np
+import time
+import textwrap
 import plotly.graph_objects as go
 import plotly.express as px
 import database as db
@@ -16,11 +19,8 @@ try:
 except ImportError:
     HAS_FINVIZ = False
 
-try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode
-    HAS_AGGRID = True
-except ImportError:
-    HAS_AGGRID = False
+from utils import visual_components as vc
+import streamlit as st
 
 AVAILABLE_METRICS = {
     "P/E Ratio": {"key": "trailingPE", "type": "range", "min": 0, "max": 200, "default": (0, 50), "step": 1.0, "format": "%.1f"},
@@ -223,13 +223,8 @@ def _render_yfinance_screener():
                     earn_growth = (info.get("earningsGrowth") or 0) * 100
                     avg_volume = info.get("averageVolume") or info.get("averageDailyVolume10Day") or 0
 
-                    score = 0
-                    if pe and pe < 20: score += 1
-                    if roe > 15: score += 1
-                    if margin > 15: score += 1
-                    if de < 100: score += 1
-                    if peg and peg < 1.5: score += 1
-                    if rev_growth > 10: score += 1
+                    from core.scoring import get_full_analysis
+                    finterm_score = get_full_analysis(ticker, info, skip_sentiment=True)
 
                     return {
                         "Ticker": ticker, "Empresa": name[:25], "Sector": sector,
@@ -238,7 +233,8 @@ def _render_yfinance_screener():
                         "D/E": round(de, 2), "PEG": peg, "Beta": beta,
                         "Div %": round(div_y, 2), "Crec Rev %": round(rev_growth, 1),
                         "Crec Earn %": round(earn_growth, 1),
-                        "Mkt Cap": mcap, "Vol Prom": avg_volume, "Score": score,
+                        "Mkt Cap": mcap, "Vol Prom": avg_volume, 
+                        "Score": finterm_score["Total"], "Quant": finterm_score["Total"]
                     }
                 except Exception:
                     return None
@@ -268,55 +264,29 @@ def _render_yfinance_screener():
 
         df = pd.DataFrame(results).sort_values("Score", ascending=False)
 
-        # ── QUANT SCORE (Multi-Factor: Value + Quality + Growth + Momentum + Safety) ──
-        try:
-            if len(df) >= 2:
-                # Value: lower P/E is better (rank ascending, best = highest rank)
-                pe_vals = df["P/E"].fillna(df["P/E"].max() if df["P/E"].notna().any() else 999)
-                df["_pe_rank"] = pe_vals.rank(ascending=True, pct=True) * 20
-
-                # Quality: higher ROE is better
-                df["_roe_rank"] = df["ROE %"].rank(ascending=True, pct=True) * 20
-
-                # Growth: higher revenue growth is better
-                df["_rev_rank"] = df["Crec Rev %"].rank(ascending=True, pct=True) * 20
-
-                # Momentum: higher earnings growth is better
-                df["_earn_rank"] = df["Crec Earn %"].rank(ascending=True, pct=True) * 20
-
-                # Safety: lower D/E is better
-                de_vals = df["D/E"].fillna(df["D/E"].max() if df["D/E"].notna().any() else 5)
-                df["_de_rank"] = de_vals.rank(ascending=False, pct=True) * 20
-
-                df["Quant"] = (
-                    df["_pe_rank"].fillna(0) +
-                    df["_roe_rank"].fillna(0) +
-                    df["_rev_rank"].fillna(0) +
-                    df["_earn_rank"].fillna(0) +
-                    df["_de_rank"].fillna(0)
-                ).round(0).astype(int)
-
-                # Drop temp columns
-                df = df.drop(columns=[c for c in df.columns if c.startswith("_")])
-            else:
-                df["Quant"] = 50  # Single stock gets neutral score
-        except Exception:
-            df["Quant"] = None
+        # ── QUANT SCORE (Ya calculado via core.scoring en _process_ticker) ──
+        # Aquí eliminamos el bloque de rankeo antiguo porque Finterm Light 
+        # nos provee 'Total' absoluto ya calculado basándose en matemáticas financieras reales.
 
         df = df.sort_values("Quant", ascending=False, na_position="last")
         st.session_state["screener_results"] = df
 
-    # ── RESULTS ──
+        # ── RESULTS ──
     if "screener_results" in st.session_state:
         df = st.session_state["screener_results"]
 
         st.markdown("<div class='sec-title'>Resultados del Screener</div>", unsafe_allow_html=True)
         k1, k2, k3 = st.columns(3)
-        k1.markdown(kpi("Acciones encontradas", str(len(df)), "", "blue"), unsafe_allow_html=True)
+        with k1:
+            vc.render_metric_card("Acciones encontradas", str(len(df)), subtitle="Cumplen criterios")
+        
         avg_pe = df["P/E"].dropna().mean()
-        k2.markdown(kpi("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "--", "", "purple"), unsafe_allow_html=True)
+        with k2:
+            vc.render_metric_card("P/E Promedio", f"{avg_pe:.1f}x" if pd.notna(avg_pe) else "--", subtitle="Grupo filtrado")
+            
         avg_roe = df["ROE %"].mean()
-        k3.markdown(kpi("ROE Promedio", f"{avg_roe:.1f}%", "", "green"), unsafe_allow_html=True)
+        with k3:
+            vc.render_metric_card("ROE Promedio", f"{avg_roe:.1f}%", subtitle="Rentabilidad media")
 
         # Score color
         def score_color(v):
@@ -397,9 +367,24 @@ def _render_yfinance_screener():
                     t_quant = row.get("Quant", 50)
                     q_color = "#34d399" if pd.notna(t_quant) and t_quant > 70 else ("#fbbf24" if pd.notna(t_quant) and t_quant >= 40 else "#f87171")
                     
+                    # New Metrics for Cards (Piotroski & Altman Z)
+                    t_pio = row.get("Piotroski", "--")
+                    try:
+                        t_pio_val = float(t_pio) if pd.notna(t_pio) else 0
+                    except (ValueError, TypeError):
+                        t_pio_val = 0
+                    pio_color = "#34d399" if t_pio_val >= 7 else ("#fbbf24" if t_pio_val >= 4 else "#f87171")
+                    
+                    t_alt = row.get("Altman Z", "--")
+                    try:
+                        t_alt_val = float(t_alt) if pd.notna(t_alt) else 0.0
+                    except (ValueError, TypeError):
+                        t_alt_val = 0.0
+                    alt_color = "#34d399" if t_alt_val >= 3.0 else ("#fbbf24" if t_alt_val >= 1.8 else "#f87171")
+
                     with col:
                         # Card HTML
-                        st.markdown(f"""
+                        st.markdown(textwrap.dedent(f"""
                         <div style='background:linear-gradient(145deg, #111827, #1f2937); border: 1px solid #374151; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>
                             <div style='display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #374151; padding-bottom: 8px; margin-bottom: 12px;'>
                                 <div>
@@ -428,9 +413,17 @@ def _render_yfinance_screener():
                                     <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>ROE Promedio</div>
                                     <div style='font-size: 15px; color: {roe_color}; font-weight: 700;'>{t_roe}</div>
                                 </div>
+                                <div>
+                                    <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>Piotroski</div>
+                                    <div style='font-size: 15px; color: {pio_color}; font-weight: 700;'>{t_pio}</div>
+                                </div>
+                                <div>
+                                    <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>Altman Z</div>
+                                    <div style='font-size: 15px; color: {alt_color}; font-weight: 700;'>{f"{t_alt:.2f}" if isinstance(t_alt, float) else t_alt}</div>
+                                </div>
                             </div>
                         </div>
-                        """, unsafe_allow_html=True)
+                        """), unsafe_allow_html=True)
                         
                         # Acciones Button Group
                         b1, b2 = st.columns(2)
@@ -445,6 +438,10 @@ def _render_yfinance_screener():
 
         if len(df_show) > top_n_cards:
             with st.expander(f"Ver {len(df_show) - top_n_cards} resultados adicionales en tabla"):
+                # ── EXPORT RESULTS ────────────────────────────────────────────────────────
+                from utils import export_utils
+                export_utils.render_export_buttons(df_show.iloc[top_n_cards:], file_prefix="screener_results")
+
                 st.dataframe(
                     df_show.iloc[top_n_cards:].style.map(score_color, subset=["Score"]).map(quant_color, subset=["Quant"]).format({"Precio": "${:.2f}", "P/E": "{:.1f}", "P/E Fwd": "{:.1f}",
                                 "D/E": "{:.2f}", "PEG": "{:.2f}", "Beta": "{:.2f}", "Div %": "{:.2f}%"}, na_rep="--"),
@@ -594,23 +591,16 @@ def _render_finviz_screener():
         else:
             k3.markdown(kpi("Precio Promedio", "--", "", "green"), unsafe_allow_html=True)
 
-        if HAS_AGGRID:
-            gb = GridOptionsBuilder.from_dataframe(df)
-            gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
-            gb.configure_default_column(filterable=True, sortable=True, resizable=True)
-            if "Ticker" in df.columns:
-                gb.configure_column("Ticker", pinned="left", cellStyle={"fontWeight": "bold", "color": "#60A5FA"})
-            
-            go_opts = gb.build()
-            AgGrid(
-                df,
-                gridOptions=go_opts,
-                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
-                theme="alpine",
-                height=500
-            )
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Ticker": st.column_config.TextColumn("Ticker", help="Símbolo del activo", width="small"),
+                "Price": st.column_config.NumberColumn("Precio", format="$%.2f"),
+                "Change": st.column_config.TextColumn("Cambio"),
+            }
+        )
 
         # ── HEATMAP: P/E by Sector ──
         if "P/E" in df.columns and "Sector" in df.columns:
@@ -1031,6 +1021,10 @@ def _render_security_finder():
                 res_df = pd.DataFrame(results)
 
                 st.markdown(f"**{len(results)} resultado(s) encontrado(s)**")
+                
+                from utils import export_utils
+                export_utils.render_export_buttons(res_df, file_prefix="finder_results")
+
                 st.dataframe(
                     res_df.style.format({
                         "Precio": "${:.2f}",

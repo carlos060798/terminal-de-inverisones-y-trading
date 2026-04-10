@@ -10,7 +10,7 @@ class AlphaVantageAdapter(LibraryMixin, BaseDataAdapter):
     _lib_name = "alpha_vantage.timeseries"
     config = ProviderConfig(
         provider_id="alpha_vantage", category="stocks",
-        credential_key="ALPHA_VANTAGE_KEY",
+        credential_key="ALPHA_VANTAGE_API_KEY",
         rate_limit_rpm=5, daily_quota=500, ttl_seconds=300, priority="high",
     )
 

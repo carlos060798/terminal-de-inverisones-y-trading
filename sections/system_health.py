@@ -1,170 +1,117 @@
-"""
-sections/system_health.py — System Health Dashboard
-Shows API connectivity status, DB stats, and terminal version.
-"""
+"""sections/system_health.py - System Architecture & DataOps Dashboard (Local Excellence)."""
 import streamlit as st
+import pandas as pd
 import os
 import time
-from datetime import datetime
-from ui_shared import kpi
+import balancer
+import database as db
+from utils import visual_components as vc
+from services import backup_service
 
-VERSION = "7.0"
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "investment_data.db")
-
-
-def _check_yfinance():
-    """Test yfinance connectivity."""
+def get_dir_size(path='.'):
+    total = 0
     try:
-        import yfinance as yf
-        t0 = time.time()
-        tk = yf.Ticker("AAPL")
-        _ = tk.fast_info.get("lastPrice", None) or tk.info.get("currentPrice")
-        latency = int((time.time() - t0) * 1000)
-        return True, latency
+        if not os.path.exists(path): return 0
+        for entry in os.scandir(path):
+            if entry.is_file():
+                total += entry.stat().size
+            elif entry.is_dir():
+                total += get_dir_size(entry.path)
     except Exception:
-        return False, 0
-
-
-def _check_fred():
-    """Test FRED API connectivity."""
-    try:
-        from fredapi import Fred
-        key = st.secrets.get("FRED_API_KEY", "") or os.environ.get("FRED_API_KEY", "")
-        if not key:
-            return False, 0
-        t0 = time.time()
-        fred = Fred(api_key=key)
-        fred.get_series("GS10", observation_start="2025-01-01")
-        latency = int((time.time() - t0) * 1000)
-        return True, latency
-    except Exception:
-        return False, 0
-
-
-def _check_ai_providers():
-    """Check which AI providers are available."""
-    try:
-        import ai_engine
-        providers = ai_engine.get_available_providers()
-        return providers
-    except Exception:
-        return []
-
-
-def _db_stats():
-    """Get database statistics."""
-    import database as db
-    conn = db.get_connection()
-    stats = {}
-    try:
-        for table in ["trades", "stock_analyses", "pdf_analyses", "investment_notes", "forex_trades", "watchlist"]:
-            try:
-                cur = conn.execute(f"SELECT COUNT(*) FROM {table}")
-                stats[table] = cur.fetchone()[0]
-            except Exception:
-                stats[table] = 0
-    finally:
-        conn.close()
-    return stats
-
+        pass
+    return total
 
 def render():
     st.markdown("""
     <div class='top-header'>
-      <h1>⚙️ Salud del Sistema</h1>
-      <p>Estado de APIs, base de datos y conectividad</p>
-    </div>""", unsafe_allow_html=True)
-
-    st.info("💡 Para métricas detalladas de los 49 proveedores, circuit breakers y latencias, visita la nueva pestaña **Data Health**.")
-
-    # ── VERSION + TIMESTAMP ──
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(kpi("Versión", f"v{VERSION}", "Quantum Retail Terminal", "blue"), unsafe_allow_html=True)
-    c2.markdown(kpi("Sesión", datetime.now().strftime("%H:%M:%S"), datetime.now().strftime("%Y-%m-%d"), "purple"), unsafe_allow_html=True)
-    db_size = os.path.getsize(DB_PATH) / 1024 if os.path.exists(DB_PATH) else 0
-    c3.markdown(kpi("Base de Datos", f"{db_size:,.0f} KB", "investment_data.db", "green"), unsafe_allow_html=True)
-
-    st.markdown("<div class='sec-title'>Conectividad de APIs</div>", unsafe_allow_html=True)
-
-    # ── API CHECKS ──
-    checks = []
-
-    with st.spinner("Verificando yfinance…"):
-        ok, lat = _check_yfinance()
-        checks.append(("yfinance", "Datos de mercado", ok, lat))
-
-    with st.spinner("Verificando FRED…"):
-        ok, lat = _check_fred()
-        checks.append(("FRED API", "Macro económico", ok, lat))
-
-    with st.spinner("Verificando IA…"):
-        try:
-            from ai_engine import get_usage_dashboard
-            ai_dashboard = get_usage_dashboard()
-            # Group by backend to show one line per backend
-            backends_seen = set()
-            for p in ai_dashboard:
-                backend = p.get("backend", "?")
-                if backend in backends_seen:
-                    continue
-                backends_seen.add(backend)
-                name_map = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq",
-                            "deepseek": "DeepSeek", "openrouter": "OpenRouter", "hf": "HuggingFace"}
-                display_name = name_map.get(backend, backend)
-                is_ok = p.get("available", False)
-                checks.append((display_name, "Motor IA", is_ok, 0))
-        except Exception:
-            ai_providers = _check_ai_providers()
-            for name in ["Gemini", "Groq", "OpenRouter"]:
-                is_ok = name.lower() in [p.lower() for p in ai_providers]
-                checks.append((name, "Motor IA", is_ok, 0))
-
-    # Display as table
-    for name, category, ok, latency in checks:
-        icon = "✅" if ok else "❌"
-        lat_str = f" ({latency}ms)" if latency > 0 else ""
-        color = "#34d399" if ok else "#f87171"
-        status_text = "Conectado" if ok else "No disponible"
-        st.markdown(f"""
-        <div style='display:flex;align-items:center;justify-content:space-between;
-                    padding:12px 16px;border-bottom:1px solid #1a1a1a;'>
-          <div style='display:flex;align-items:center;gap:12px;'>
-            <span style='font-size:18px;'>{icon}</span>
-            <div>
-              <div style='color:#f0f6ff;font-weight:600;font-size:14px;'>{name}</div>
-              <div style='color:#5a6f8a;font-size:11px;'>{category}</div>
-            </div>
-          </div>
-          <div style='text-align:right;'>
-            <div style='color:{color};font-weight:600;font-size:13px;'>{status_text}{lat_str}</div>
-          </div>
-        </div>""", unsafe_allow_html=True)
-
-    # ── DB STATS ──
-    st.markdown("<div class='sec-title'>Estadísticas de Base de Datos</div>", unsafe_allow_html=True)
-
-    stats = _db_stats()
-    cols = st.columns(3)
-    stat_items = [
-        ("Trades", stats.get("trades", 0), "blue"),
-        ("Análisis PDF", stats.get("pdf_analyses", 0), "purple"),
-        ("Análisis Stock", stats.get("stock_analyses", 0), "green"),
-        ("Tesis", stats.get("investment_notes", 0), "blue"),
-        ("Forex Trades", stats.get("forex_trades", 0), "purple"),
-        ("Watchlist", stats.get("watchlist", 0), "green"),
-    ]
-    for i, (label, count, color) in enumerate(stat_items):
-        cols[i % 3].markdown(kpi(label, str(count), "registros", color), unsafe_allow_html=True)
-
-    # ── SESSION STATE ──
-    st.markdown("<div class='sec-title'>Estado de Sesión</div>", unsafe_allow_html=True)
-    active = st.session_state.get("active_ticker", "—")
-    st.markdown(f"""
-    <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:14px;padding:16px;'>
-      <div style='display:flex;gap:40px;'>
-        <div><span style='color:#5a6f8a;font-size:11px;text-transform:uppercase;'>Ticker Activo</span><br>
-             <span style='color:#60a5fa;font-size:18px;font-weight:700;'>{active if active else '—'}</span></div>
-        <div><span style='color:#5a6f8a;font-size:11px;text-transform:uppercase;'>Keys en Session</span><br>
-             <span style='color:#f0f6ff;font-size:18px;font-weight:700;'>{len(st.session_state)}</span></div>
+      <div>
+        <h1>Local System Health</h1>
+        <p>Monitoreo de recursos PC · Backups · Integridad de Datos</p>
       </div>
     </div>""", unsafe_allow_html=True)
+    
+    # --- 1. LOCAL RESOURCES ---
+    st.markdown("<div class='sec-title'>Recursos de Almacenamiento</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # DB Size
+    db_size = os.path.getsize(db.DB_PATH) if os.path.exists(db.DB_PATH) else 0
+    with col1:
+        vc.render_metric_card("Fichero DB", f"{db_size/1024/1024:.2f} MB", subtitle="investment_data.db")
+        
+    # Backup Size
+    backup_size = get_dir_size("backups")
+    with col2:
+        vc.render_metric_card("Backups Totales", f"{backup_size/1024/1024:.2f} MB", subtitle="Carpeta /backups")
+        
+    # Cache Size
+    cache_size = get_dir_size(".streamlit/cache") # Example path
+    with col3:
+        vc.render_metric_card("Caché en Disco", f"{cache_size/1024/1024:.2f} MB", subtitle="Persistencia temporal")
+
+    # --- 2. BACKUP MANAGEMENT ---
+    st.markdown("<div class='sec-title'>Gestión de Respaldos</div>", unsafe_allow_html=True)
+    
+    b1, b2 = st.columns([2, 1])
+    with b1:
+        try:
+            if os.path.exists("backups"):
+                backup_files = [f for f in os.listdir("backups") if f.startswith("backup_")]
+                backup_files.sort(reverse=True)
+                if backup_files:
+                    st.write(f"Últimos {len(backup_files)} respaldos encontrados:")
+                    st.dataframe(pd.DataFrame([{"Archivo": f, "Fecha": time.ctime(os.path.getmtime(os.path.join("backups", f)))} for f in backup_files]), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No se han encontrado archivos de respaldo.")
+            else:
+                st.info("El directorio de backups se creará con el primer respaldo.")
+        except Exception as e:
+            st.error(f"Error leyendo backups: {e}")
+            
+    with b2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Crear Respaldo Ahora", use_container_width=True):
+            path = backup_service.run_backup(db.DB_PATH)
+            if path:
+                st.success(f"Respaldo creado: {os.path.basename(path)}")
+                st.rerun()
+            else:
+                st.error("Error al crear el respaldo.")
+        
+        if st.button("🗑️ Limpiar Backups Antiguos", use_container_width=True):
+            backup_service._cleanup_old_backups("backups", limit=3)
+            st.success("Limpieza completada (manteniendo los 3 más recientes).")
+            st.rerun()
+
+    # --- 3. AI & LATENCY ---
+    st.markdown("<div class='sec-title'>Latencias de Inferencia</div>", unsafe_allow_html=True)
+    data = balancer.dashboard_data()
+    df_ai = pd.DataFrame(data)
+    
+    st.dataframe(
+        df_ai[["name", "backend", "model", "pct", "limit", "available"]].sort_values("pct", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "pct": st.column_config.ProgressColumn("Uso de Cuota %", format="%.1f%%", min_value=0, max_value=100),
+            "available": st.column_config.CheckboxColumn("Activo"),
+        }
+    )
+
+    # --- 4. DATA INTEGRITY ---
+    st.markdown("<div class='sec-title'>Integridad de Tablas</div>", unsafe_allow_html=True)
+    try:
+        conn = db.get_connection()
+        tables = ["watchlist", "trades", "market_sentiment", "stock_analyses", "alerts"]
+        rows = []
+        for t in tables:
+            try:
+                cnt = pd.read_sql(f"SELECT COUNT(*) as c FROM {t}", conn).iloc[0]["c"]
+                rows.append({"Tabla": t, "Registros": cnt, "Status": "OK"})
+            except:
+                rows.append({"Tabla": t, "Registros": 0, "Status": "ERROR"})
+        conn.close()
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    except:
+        st.error("No se pudo conectar a la DB.")

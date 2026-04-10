@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import pandas as pd
+import yfinance as yf
 import os
 from models import init_models, SessionLocal, engine
 
@@ -15,7 +16,9 @@ else:
     DB_PATH = os.path.join("/tmp", "investment_data.db")
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     conn.row_factory = sqlite3.Row
     return conn
 

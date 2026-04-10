@@ -3,6 +3,7 @@ Quantum Retail Terminal — Pro Edition
 Dashboard privado de inversiones · Streamlit + SQLite + yfinance
 """
 import streamlit as st
+from datetime import datetime
 import streamlit.components.v1 as components
 import streamlit_antd_components as sac
 import database as db
@@ -23,25 +24,9 @@ def load_css(file_path):
 
 load_css("assets/styles.css")
 
-# ── INIT ───────────────────────────────────────────────────────────────────────
-db.init_db()
-
-# ── BACKGROUND SYNC ────────────────────────────────────────────────────────────
-from tasks.data_sync import init_scheduler
-
-@st.cache_resource
-def start_sync_tasks():
-    """Lanza el scheduler de fondo una sola vez por sesión del servidor."""
-    try:
-        return init_scheduler()
-    except Exception as e:
-        st.warning(f"No se pudo iniciar el scheduler de fondo: {e}")
-        return None
-
-_scheduler = start_sync_tasks()
 
 # ── GLOBAL STATE ──────────────────────────────────────────────────────────────
-for _key, _default in [("active_ticker", ""), ("last_section", ""), ("nav_history", [])]:
+for _key, _default in [("active_ticker", ""), ("last_section", ""), ("nav_history", []), ("force_llm", "Auto-Balanceador")]:
     if _key not in st.session_state:
         st.session_state[_key] = _default
 
@@ -55,7 +40,7 @@ components.html("""
       "symbols": [
         {"proName":"FOREXCOM:SPXUSD","title":"S&P 500"},
         {"proName":"FOREXCOM:NSXUSD","title":"US 100"},
-        {"proName":"FX_IDC:EURUSD","title":"EUR/USD"},
+        {"coolName":"FX_IDC:EURUSD","title":"EUR/USD"},
         {"proName":"BITSTAMP:BTCUSD","title":"Bitcoin"},
         {"proName":"BITSTAMP:ETHUSD","title":"Ethereum"},
         {"proName":"FOREXCOM:DJI","title":"Dow Jones"},
@@ -73,17 +58,24 @@ components.html("""
 """, height=46)
 
 
-# Header row: brand + search
-_hdr1, _hdr2 = st.columns([5, 1])
+# ── TOP STICKY HEADER ─────────────────────────────────────────────────────────
+st.markdown('<div class="top-header">', unsafe_allow_html=True)
+_hdr1, _hdr2, _hdr3 = st.columns([3.5, 1.5, 1])
 with _hdr1:
-    st.markdown("<span style='font-size:17px;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.5px;'>💎 Quantum Retail Terminal</span><span style='font-size:10px;color:#3e5068;margin-left:10px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v5.1</span>", unsafe_allow_html=True)
+    st.markdown("<span style='font-size:17px;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.5px;'>💎 Quantum Retail Terminal</span><span style='font-size:10px;color:#3e5068;margin-left:10px;text-transform:uppercase;letter-spacing:1.5px;'>Pro Edition · v7.0</span>", unsafe_allow_html=True)
+
 with _hdr2:
+    _ia_options = ["Auto-Balanceador", "openai-4o", "openai-4o-mini", "groq-llama", "deepseek-reasoner", "deepseek-chat", "gemini-flash", "Local-FinBERT", "Local-Llama"]
+    st.session_state.force_llm = st.selectbox("AI Engine", options=_ia_options, 
+                                             index=_ia_options.index(st.session_state.force_llm) if st.session_state.force_llm in _ia_options else 0,
+                                             label_visibility="collapsed")
+with _hdr3:
     _ticker_in = st.text_input("🔍", placeholder="Ticker (ej: AAPL)",
                                 value=st.session_state.get("active_ticker", ""),
                                 label_visibility="collapsed")
     if _ticker_in.strip() and _ticker_in.strip().upper() != st.session_state.get("active_ticker", ""):
         st.session_state.active_ticker = _ticker_in.strip().upper()
-        # F3: Search History — track recent searches
+        # Search History logic
         try:
             if "search_history" not in st.session_state:
                 st.session_state.search_history = []
@@ -92,23 +84,45 @@ with _hdr2:
                 st.session_state.search_history.remove(_new_ticker)
             st.session_state.search_history.insert(0, _new_ticker)
             st.session_state.search_history = st.session_state.search_history[:10]
-        except Exception:
-            pass
+        except Exception: pass
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # F3: Display search history as clickable buttons
-    try:
-        if st.session_state.get('search_history'):
-            st.caption("Recientes:")
-            cols = st.columns(min(len(st.session_state.search_history), 5))
-            for i, t in enumerate(st.session_state.search_history[:5]):
-                with cols[i]:
-                    if st.button(t, key=f"hist_{t}"):
-                        st.session_state.active_ticker = t
-                        st.rerun()
-    except Exception:
-        pass
+# ── SEARCH HISTORY BUTTONS (Just below header) ──────────────────────────────
+if st.session_state.get('search_history'):
+    cols = st.columns(min(len(st.session_state.search_history), 8))
+    for i, t in enumerate(st.session_state.search_history[:8]):
+        with cols[i]:
+            if st.button(t, key=f"hist_{t}", use_container_width=True):
+                st.session_state.active_ticker = t
+                st.rerun()
 
 # ── ANT DESIGN NAVIGATION ─────────────────────────────────────────────────────
+# ── INIT & BACKUP ──────────────────────────────────────────────────────────────
+db.init_db()
+
+@st.cache_resource
+def perform_startup_backup():
+    try:
+        from services import backup_service
+        backup_service.run_backup(db.DB_PATH)
+    except Exception: pass
+
+perform_startup_backup()
+
+# ── BACKGROUND SYNC ────────────────────────────────────────────────────────────
+from tasks.data_sync import init_scheduler
+
+@st.cache_resource
+def start_sync_tasks():
+    """Lanza el scheduler de fondo una sola vez por sesión del servidor."""
+    try:
+        return init_scheduler()
+    except Exception as e:
+        st.warning(f"No se pudo iniciar el scheduler de fondo: {e}")
+        return None
+
+_scheduler = start_sync_tasks()
+
 _active = sac.tabs([
     sac.TabsItem(label="Dashboard", icon="house"),
     sac.TabsItem(label="Acciones", icon="graph-up-arrow"),

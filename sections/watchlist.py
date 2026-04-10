@@ -12,6 +12,8 @@ from plotly.subplots import make_subplots
 import database as db
 from ui_shared import DARK, dark_layout, fmt, kpi
 import matplotlib.pyplot as plt
+from utils import visual_components as vc
+from finterm import charts as fc
 
 try:
     from pypfopt import EfficientFrontier, risk_models, expected_returns
@@ -31,11 +33,7 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
-try:
-    import riskfolio as rp
-    HAS_RISKFOLIO = True
-except ImportError:
-    HAS_RISKFOLIO = False
+
 
 
 def _calc_rsi(series, period=14):
@@ -59,12 +57,12 @@ def _calc_macd(series, fast=12, slow=26, signal=9):
 
 def render():
     st.markdown("""
-    <div class='top-header'>
-      <div>
-        <h1>Watchlist & Cartera</h1>
-        <p>Precios en tiempo real · RSI & MACD · Benchmark S&P500 · Dividendos</p>
-      </div>
-    </div>""", unsafe_allow_html=True)
+<div class='top-header'>
+  <div>
+    <h1>Watchlist & Cartera</h1>
+    <p>Precios en tiempo real · RSI & MACD · Benchmark S&P500 · Dividendos</p>
+  </div>
+</div>""", unsafe_allow_html=True)
 
     # ── Portfolio Lists ──
     list_col1, list_col2, list_col3 = st.columns([3, 2, 1])
@@ -204,17 +202,32 @@ def render():
                 try:
                     obj  = yf.Ticker(tk)
                     fi   = obj.fast_info
-                    hist = obj.history(period="2d")
+                    # Fetch 1 month for sparkline
+                    hist = obj.history(period="1mo")
                     price = fi.last_price or 0
                     prev  = hist["Close"].iloc[-2] if len(hist) >= 2 else price
                     chg   = ((price - prev) / prev * 100) if prev else 0
                     info  = obj.info
-                    rows.append({"ticker": tk, "Precio": price, "Cambio %": chg,
-                                 "P/E": info.get("trailingPE"), "52W High": info.get("fiftyTwoWeekHigh"),
-                                 "52W Low": info.get("fiftyTwoWeekLow"), "Mkt Cap": fi.market_cap})
+                    
+                    # Sparkline data (Trend)
+                    trend_data = hist["Close"].tolist() if not hist.empty else []
+                    
+                    rows.append({
+                        "ticker": tk, 
+                        "Precio": price, 
+                        "Cambio %": chg,
+                        "P/E": info.get("trailingPE"), 
+                        "52W High": info.get("fiftyTwoWeekHigh"),
+                        "52W Low": info.get("fiftyTwoWeekLow"), 
+                        "Mkt Cap": fi.market_cap,
+                        "Tendencia": trend_data
+                    })
                 except Exception:
-                    rows.append({"ticker": tk, "Precio": None, "Cambio %": None,
-                                 "P/E": None, "52W High": None, "52W Low": None, "Mkt Cap": None})
+                    rows.append({
+                        "ticker": tk, "Precio": None, "Cambio %": None,
+                        "P/E": None, "52W High": None, "52W Low": None, 
+                        "Mkt Cap": None, "Tendencia": []
+                    })
 
         mkt = pd.DataFrame(rows)
         df  = wl.merge(mkt, on="ticker", how="left")
@@ -229,15 +242,23 @@ def render():
 
         # ── Portfolio KPIs ──
         k1, k2, k3, k4 = st.columns(4)
-        k1.markdown(kpi("Valor Total", fmt(total_val), f"{len(df)} posiciones", "blue"), unsafe_allow_html=True)
-        k2.markdown(kpi("Capital Invertido", fmt(total_inv), "", "purple"), unsafe_allow_html=True)
-        pnl_color = "green" if total_pnl >= 0 else "red"
-        pnl_sign  = "+" if total_pnl >= 0 else ""
-        k3.markdown(kpi("P&L Total", fmt(total_pnl), f"{pnl_sign}{total_pct:.2f}%", pnl_color), unsafe_allow_html=True)
+        with k1:
+            vc.render_metric_card("Valor Total", fmt(total_val), subtitle=f"{len(df)} posiciones")
+        with k2:
+            vc.render_metric_card("Capital Invertido", fmt(total_inv), subtitle="Costo base")
+        
+        with k3:
+            vc.render_metric_card("P&L Total", fmt(total_pnl), subtitle=f"{total_pct:+.2f}%", delta=total_pct)
+        
         best_pos = df.loc[df["P&L %"].idxmax(), "ticker"] if not df["P&L %"].isna().all() else "—"
-        k4.markdown(kpi("Mejor Posición", best_pos, "", "green"), unsafe_allow_html=True)
+        with k4:
+            vc.render_metric_card("Mejor Posición", best_pos, subtitle="Máximo retorno")
 
         st.markdown("<div class='sec-title'>Tabla de Posiciones</div>", unsafe_allow_html=True)
+        
+        # ── EXPORT BUTTONS ────────────────────────────────────────────────────────
+        from utils import export_utils
+        export_utils.render_export_buttons(df, file_prefix="watchlist_export")
         
         # Calculate Trade Health (0 to 1)
         # 0 = SL, 1 = TP
@@ -253,8 +274,8 @@ def render():
 
         df["Health"] = df.apply(_calc_health, axis=1)
         
-        tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "stop_loss", "take_profit", "Health", "Valor", "P&L $", "P&L %"]].copy()
-        tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "SL", "TP", "Trade Health", "Valor ($)", "P&L ($)", "P&L %"]
+        tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "Tendencia", "stop_loss", "take_profit", "Health", "Valor", "P&L $", "P&L %"]].copy()
+        tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "Tendencia (30d)", "SL", "TP", "Trade Health", "Valor ($)", "P&L ($)", "P&L %"]
 
         def clr(v):
             if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -269,6 +290,11 @@ def render():
                               na_rep="—"),
             use_container_width=True, hide_index=True,
             column_config={
+                "Tendencia (30d)": st.column_config.AreaChartColumn(
+                    "Tendencia (30d)",
+                    help="Evolución del precio último mes",
+                    width="medium"
+                ),
                 "Trade Health": st.column_config.ProgressColumn(
                     "Estado Trade (SL→TP)",
                     help="Posición del precio respecto al SL (0%) y TP (100%)",
@@ -286,14 +312,9 @@ def render():
         with cc1:
             pie_d = df[df["Valor"] > 0]
             if not pie_d.empty:
-                fig_p = px.pie(pie_d, names="ticker", values="Valor", hole=0.5,
-                               color_discrete_sequence=["#60a5fa", "#34d399", "#a78bfa", "#fbbf24",
-                                                        "#f87171", "#38bdf8", "#4ade80", "#e879f9"])
-                fig_p.update_traces(textposition="inside", textinfo="percent+label",
-                                    textfont=dict(color="white", size=11))
-                fig_p.update_layout(**DARK, height=320,
-                    title=dict(text="Composición de Cartera", font=dict(color="#94a3b8", size=13), x=0.5),
-                    showlegend=False)
+                # Usamos el componente estandarizado de distribución de activos
+                weights = dict(zip(pie_d["ticker"], pie_d["Valor"]))
+                fig_p = fc.create_allocation_donut(weights)
                 st.plotly_chart(fig_p, use_container_width=True)
 
         with cc2:
@@ -955,14 +976,7 @@ def render():
                         st.warning("No se pudieron obtener datos suficientes para la correlación.")
                     else:
                         st.markdown("<div class='sec-title'>Matriz de Correlación (1 año)</div>", unsafe_allow_html=True)
-                        fig_corr = px.imshow(
-                            corr,
-                            text_auto=".2f",
-                            color_continuous_scale=["#f87171", "#000000", "#34d399"],
-                            aspect="auto",
-                        )
-                        fig_corr.update_layout(**DARK, height=400,
-                            title=dict(text="Correlación de Retornos Diarios", font=dict(color="#94a3b8", size=13), x=0.5))
+                        fig_corr = fc.create_correlation_heatmap(corr)
                         st.plotly_chart(fig_corr, use_container_width=True)
 
                         st.markdown("""
@@ -1175,32 +1189,13 @@ def render():
                                     results[i, 1] = p_ret
                                     results[i, 2] = (p_ret - 0.02) / p_vol
 
-                                fig_ef = go.Figure()
-                                fig_ef.add_trace(go.Scatter(
-                                    x=results[:, 0] * 100, y=results[:, 1] * 100,
-                                    mode="markers",
-                                    marker=dict(size=3, color=results[:, 2], colorscale="Viridis",
-                                                showscale=True, colorbar=dict(title="Sharpe")),
-                                    name="Portafolios aleatorios",
-                                    hovertemplate="Vol: %{x:.1f}%<br>Ret: %{y:.1f}%<extra></extra>"
-                                ))
-                                fig_ef.add_trace(go.Scatter(
-                                    x=[perf_sharpe[1] * 100], y=[perf_sharpe[0] * 100],
-                                    mode="markers", name="Max Sharpe",
-                                    marker=dict(symbol="star", size=18, color="#22c55e", line=dict(width=1, color="white"))
-                                ))
-                                fig_ef.add_trace(go.Scatter(
-                                    x=[perf_minvol[1] * 100], y=[perf_minvol[0] * 100],
-                                    mode="markers", name="Min Volatilidad",
-                                    marker=dict(symbol="star", size=18, color="#3b82f6", line=dict(width=1, color="white"))
-                                ))
-                                fig_ef.update_layout(
-                                    **DARK, height=500,
-                                    title=dict(text="Frontera Eficiente — 5000 portafolios simulados",
-                                               font=dict(color="#94a3b8", size=14), x=0.5),
-                                    xaxis_title="Volatilidad (%)",
-                                    yaxis_title="Retorno Esperado (%)",
-                                    legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a")
+                                # Usamos el componente institucional de finterm
+                                # Usamos el componente institucional de finterm
+                                # results[:, 0] = Vol, results[:, 1] = Ret
+                                fig_ef = fc.create_efficient_frontier_chart(
+                                    results,
+                                    max_sharpe=[perf_sharpe[1], perf_sharpe[0]],
+                                    min_vol=[perf_minvol[1], perf_minvol[0]]
                                 )
                                 st.plotly_chart(fig_ef, use_container_width=True)
 
@@ -1368,85 +1363,61 @@ def render():
                                     }).sort_values("Risk Parity (%)", ascending=False)
                                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
-                                # ── PHASE 2: HRP INSTITUCIONAL (RISKFOLIO) ──
-                                if HAS_RISKFOLIO:
+                                # ── PHASE 2: SCIPY EFFICIENT FRONTIER ──
+                                if HAS_SCIPY:
                                     st.markdown("---")
-                                    st.markdown("<div class='sec-title'>📐 HRP Institucional (Hierarchical Risk Parity)</div>", unsafe_allow_html=True)
-                                    st.caption("Optimizador avanzado que utiliza clustering jerárquico para diversificar el riesgo basado en correlaciones.")
+                                    st.markdown("<div class='sec-title'>📐 Optimización: Retorno Máximo vs Riesgo</div>", unsafe_allow_html=True)
+                                    st.caption("Frontera Eficiente calculada matemáticamente con Scipy (Finterm Light Optimizer).")
                                     
                                     try:
-                                        # Building the portfolio object
-                                        port = rp.Portfolio(returns=returns_rp)
+                                        # Maximize Sharpe Ratio
+                                        def neg_sharpe(weights, mean_returns, cov_matrix, risk_free_rate):
+                                            p_ret = np.sum(mean_returns * weights) * 252
+                                            p_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+                                            return -(p_ret - risk_free_rate) / p_vol
                                         
-                                        # Estimate method (sample or ledroit-wolf)
-                                        port.assets_stats(method_mu='hist', method_cov='hist', d=0.94)
+                                        args = (mu_rp / 252, cov_matrix / 252, 0.0)
+                                        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+                                        bounds = tuple((0.0, 1.0) for asset in range(n_assets_rp))
                                         
-                                        # Optimization parameters
-                                        model='HRP' # Hierarchical Risk Parity
-                                        codependence = 'pearson' # Codependence matrix
-                                        rm = 'MV' # Risk measure
-                                        rf = 0 # Risk free rate
-                                        linkage = 'ward' # Linkage method
-                                        max_k = 10 # Max clusters
-                                        leaf_order = True # Order leaves of dendrogram
+                                        result_sharpe = scipy_minimize(neg_sharpe, n_assets_rp * [1. / n_assets_rp,], args=args,
+                                                method='SLSQP', bounds=bounds, constraints=constraints)
                                         
-                                        w_hrp = port.optimization(model=model, codependence=codependence,
-                                                                 rm=rm, rf=rf, linkage=linkage,
-                                                                 max_k=max_k, leaf_order=leaf_order)
+                                        w_sharpe = result_sharpe.x
+                                        max_ret = np.sum((mu_rp/252) * w_sharpe) * 252 * 100
+                                        max_vol = np.sqrt(np.dot(w_sharpe.T, np.dot((cov_matrix/252) * 252, w_sharpe))) * 100
+                                        max_sharpe = max_ret / max_vol if max_vol > 0 else 0
                                         
-                                        if w_hrp is not None:
-                                            # Weights display
-                                            hr_c1, hr_c2 = st.columns([1, 1])
+                                        hr_c1, hr_c2 = st.columns([1, 1])
+                                        with hr_c1:
+                                            df_sharpe = pd.DataFrame({'Ticker': valid_tickers_rp, 'Peso': w_sharpe * 100})
+                                            df_sharpe = df_sharpe[df_sharpe['Peso'] > 1.0] # Only show >1%
                                             
-                                            with hr_c1:
-                                                df_hrp = w_hrp.reset_index()
-                                                df_hrp.columns = ['Ticker', 'Peso']
-                                                df_hrp['Peso'] *= 100
-                                                
-                                                fig_h = px.pie(df_hrp, values='Peso', names='Ticker', 
-                                                              title="Distribucion Optima HRP",
-                                                              hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                                                fig_h.update_layout(**DARK, height=400)
-                                                st.plotly_chart(fig_h, use_container_width=True)
+                                            fig_h = px.pie(df_sharpe, values='Peso', names='Ticker', 
+                                                          title="Distribución Optima (Max Sharpe)",
+                                                          hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                                            fig_h.update_layout(**DARK, height=400)
+                                            st.plotly_chart(fig_h, use_container_width=True)
+                                        
+                                        with hr_c2:
+                                            st.markdown("<br><br>", unsafe_allow_html=True)
+                                            st.markdown(f"""
+                                            <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:20px;'>
+                                              <div style='color:#94a3b8;font-size:12px;margin-bottom:10px;'>METRICAS MAX SHARPE</div>
+                                              <div style='font-size:20px;font-weight:700;color:#60a5fa;'>Retorno Esperado: {max_ret:.2f}%</div>
+                                              <div style='font-size:20px;font-weight:700;color:#f87171;'>Volatilidad: {max_vol:.2f}%</div>
+                                              <div style='font-size:20px;font-weight:700;color:#34d399;'>Sharpe Ratio: {max_sharpe:.2f}</div>
+                                            </div>""", unsafe_allow_html=True)
                                             
-                                            with hr_c2:
-                                                # Metrics comparison
-                                                # port.returns is where Riskfolio stores returns
-                                                # HRP usually has lower volatility but potentially lower returns than MV
-                                                hrp_ret = (w_hrp.values.flatten() @ mu_rp) * 100
-                                                hrp_vol = np.sqrt(w_hrp.values.flatten() @ cov_matrix @ w_hrp.values.flatten()) * 100
-                                                hrp_sharpe = (hrp_ret - 2.0) / hrp_vol if hrp_vol > 0 else 0
-                                                
-                                                st.markdown("<br><br>", unsafe_allow_html=True)
-                                                st.markdown(f"""
-                                                <div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:20px;'>
-                                                  <div style='color:#94a3b8;font-size:12px;margin-bottom:10px;'>METRICAS HRP</div>
-                                                  <div style='font-size:20px;font-weight:700;color:#60a5fa;'>Retorno: {hrp_ret:.2f}%</div>
-                                                  <div style='font-size:20px;font-weight:700;color:#f87171;'>Volatilidad: {hrp_vol:.2f}%</div>
-                                                  <div style='font-size:20px;font-weight:700;color:#34d399;'>Sharpe: {hrp_sharpe:.2f}</div>
-                                                </div>""", unsafe_allow_html=True)
-                                                
-                                                if st.button("Aplicar Pesos HRP al Rebalanceador"):
-                                                    for tk, weight in zip(df_hrp['Ticker'], df_hrp['Peso']):
-                                                        st.session_state[f"rebal_target_{tk}"] = round(weight, 2)
-                                                    st.success("Pesos cargados en la pestaña 'Rebalanceo'.")
-                                            
-                                            # Cluster Dendrogram
-                                            with st.expander("Ver Dendrograma de Clustering Jerarquico"):
-                                                fig_d, ax_d = plt.subplots(figsize=(10, 6))
-                                                rp.plot_dendrogram(returns=returns_rp,
-                                                                  codependence='pearson',
-                                                                  linkage='ward',
-                                                                  k=None,
-                                                                  max_k=10,
-                                                                  leaf_order=True,
-                                                                  ax=ax_d)
-                                                st.pyplot(fig_d)
+                                            if st.button("Aplicar Pesos Máx Sharpe", key="apply_sharpe"):
+                                                for tk, weight in zip(df_sharpe['Ticker'], df_sharpe['Peso']):
+                                                    st.session_state[f"rebal_target_{tk}"] = round(weight, 2)
+                                                st.success("Pesos cargados en Rebalanceo.")
                                                 
                                     except Exception as e_h:
-                                        st.error(f"Error en calculo HRP: {e_h}")
+                                        st.error(f"Error en Scipy: {e_h}")
                                 else:
-                                    st.info("Para HRP avanzado, por favor instale riskfolio-lib.")
+                                    st.info("Requiere Scipy.")
         except Exception as e:
             st.error(f"Error en optimización de cartera: {e}")
 
@@ -1777,9 +1748,16 @@ def render():
 
                     # Get live prices for weights
                     try:
-                        prices_mc = get_batch_prices(tuple(tickers_mc))
+                        # Using yfinance to download prices directly
+                        prices_df = yf.download(tickers_mc, period="1d", progress=False)["Close"]
+                        if isinstance(prices_df, pd.Series):
+                            prices_mc = {tickers_mc[0]: prices_df.iloc[-1]}
+                        else:
+                            prices_mc = {t: prices_df[t].iloc[-1] for t in tickers_mc if t in prices_df.columns}
+                            
                         values = [shares[i] * prices_mc.get(tickers_mc[i], costs[i]) for i in range(len(tickers_mc))]
-                    except Exception:
+                    except Exception as e:
+                        print(f"Fallback due to price error: {e}")
                         values = [shares[i] * costs[i] for i in range(len(tickers_mc))]
 
                     total_val_mc = sum(values)
@@ -1963,6 +1941,9 @@ def render():
                         if isinstance(val, str) and "PUT" in val:
                             return "color:#f87171"
                         return ""
+
+                    from utils import export_utils
+                    export_utils.render_export_buttons(opt_df, file_prefix="options_flow_unusals")
 
                     st.dataframe(
                         opt_df.style.map(_opt_color, subset=["Tipo"]).format({
@@ -2196,11 +2177,14 @@ def render():
                     ))
                     fig_sq.add_hline(y=50, line_dash="dot", line_color="#fbbf24",
                                      annotation_text="Umbral de Alerta")
-                    fig_sq.update_layout(**DARK, height=400,
-                                         title=dict(text="Short Squeeze Score por Ticker",
-                                                     font=dict(color="#94a3b8", size=14), x=0.5),
-                                         xaxis_title="Ticker", yaxis_title="Squeeze Score (0-100)",
-                                         yaxis=dict(range=[0, 105]))
+                    fig_sq.update_layout(
+                        **{k: v for k, v in DARK.items() if k != 'yaxis'},
+                        height=400,
+                        title=dict(text="Short Squeeze Score por Ticker", font=dict(color="#94a3b8", size=14), x=0.5),
+                        xaxis_title="Ticker", 
+                        yaxis_title="Squeeze Score (0-100)",
+                        yaxis=dict(range=[0, 105])
+                    )
                     st.plotly_chart(fig_sq, use_container_width=True)
 
                     # Table

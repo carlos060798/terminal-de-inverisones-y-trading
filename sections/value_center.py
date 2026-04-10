@@ -460,7 +460,7 @@ def _render_dividend_tab(ticker, info):
         current_y = div_yield / 100
         tax = 0.15 # 15% dividend tax
         appreciation = 0.07 # 7% price growth
-        dgr_rate = (dgr / 100) if dgr > 0 else 0.05
+        dgr_rate = (dgr / 100) if (dgr is not None and dgr > 0) else 0.05
         
         data = []
         port = init

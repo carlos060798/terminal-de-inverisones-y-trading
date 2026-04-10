@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 import streamlit as st
 import database as db
-import services.data_ingestion.reddit_service as reddit
+# import services.data_ingestion.reddit_service as reddit (Sin Reddit/Twitter por política institucional)
 import services.data_ingestion.tiingo_service as tiingo
 import services.data_ingestion.finnhub_service as finnhub
 import services.data_ingestion.macro_service as macro
@@ -21,8 +21,8 @@ def run_sync_all():
     except Exception:
         tickers = ["SPY", "QQQ", "AAPL", "MSFT", "TSLA"]
     
-    # 1. Sentimiento Reddit (Menciones en subs top financieros)
-    reddit.sync_reddit_sentiment(tickers)
+    # 1. Sentimiento Reddit (DESACTIVADO por arquitectura institucional)
+    # reddit.sync_reddit_sentiment(tickers)
     
     # 2. Noticias Tiingo y Ratings Finnhub (Procesar los top 10 para balancear carga)
     for ticker in tickers[:10]:
@@ -44,7 +44,7 @@ def init_scheduler():
     
     # Programación de tareas
     
-    # Tarea 1: Ciclo completo cada 4 horas (Sentimiento, Ratings, Noticias)
+    # Tarea 1: Ciclo completo cada 4 horas (Ratings, Noticias)
     scheduler.add_job(run_sync_all, 'interval', hours=4, id="full_sync_job")
     
     # Tarea 2: Sincronización rápida de Cripto (cada 15 minutos)

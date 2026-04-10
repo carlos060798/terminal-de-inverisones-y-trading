@@ -29,6 +29,10 @@ huggingface_hub>=0.20.0
 xgboost
 prophet
 arch
+apscheduler
+wbgapi
+pycoingecko
+sqlalchemy
 
 # Data Fabric v7 Core & Adapters
 imf-reader
@@ -71,3 +75,8 @@ chromadb>=0.4.0
 sentence-transformers>=2.0.0
 transformers>=4.30.0
 torch>=2.0.0
+
+# finterm/charts Dependencies
+mplfinance>=0.12.9
+streamlit-extras>=0.4.0
+plotly-resampler>=0.9.0

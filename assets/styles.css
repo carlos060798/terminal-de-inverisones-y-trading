@@ -1,4 +1,4 @@
-﻿
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
@@ -10,8 +10,8 @@
    BASE & GLOBAL
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .stApp {
-    background: #000000;
-    color: #e2e8f0;
+    background: #0f172a;
+    color: #f1f5f9;
 }
 /* Remove top padding â€” full-width panels */
 .main .block-container {
@@ -66,13 +66,18 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
    TOP HEADER BANNER
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .top-header {
-    background: #000000;
-    border: 1px solid #111111;
-    border-radius: 20px;
-    padding: 28px 36px;
-    margin-bottom: 32px;
-    position: relative;
-    overflow: hidden;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 12px 36px;
+    margin-bottom: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 .top-header::before {
     content: '';
@@ -88,6 +93,7 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
     margin: 0 !important;
     background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #c084fc 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     letter-spacing: -0.5px !important;
 }
@@ -102,13 +108,14 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
    KPI CARDS
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .kpi-card {
-    background: linear-gradient(145deg, #0a0a0a, #111111);
-    border: 1px solid #1a1a1a;
+    background: rgba(30, 41, 59, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 16px;
     padding: 22px 24px;
     position: relative;
     overflow: hidden;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .kpi-card:hover {
     border-color: rgba(59,130,246,0.3);
@@ -127,7 +134,7 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
     font-size: 10px; font-weight: 600; color: #5a6f8a;
     text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 10px;
 }
-.kpi-value { font-size: 26px; font-weight: 800; color: #f0f6ff; line-height: 1.1; }
+.kpi-value { font-size: 26px; font-weight: 800; color: #ffffff; line-height: 1.1; }
 .kpi-sub   { font-size: 12px; margin-top: 8px; font-weight: 500; }
 .kpi-green { color: #34d399; }
 .kpi-red   { color: #f87171; }
@@ -159,16 +166,17 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
    METRIC CARDS
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .metric-card {
-    background: #0a0a0a;
-    border: 1px solid #1a1a1a;
+    background: rgba(30, 41, 59, 0.4);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.03);
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 10px;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
 }
 .metric-card:hover { border-color: rgba(59,130,246,0.2); }
 .metric-card .mc-label { font-size: 10px; color: #5a6f8a; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
-.metric-card .mc-value { font-size: 24px; font-weight: 800; color: #f0f6ff; margin: 8px 0 6px; }
+.metric-card .mc-value { font-size: 24px; font-weight: 800; color: #ffffff; margin: 8px 0 6px; }
 .metric-card .mc-bench { font-size: 11px; color: #475569; }
 .metric-pass { border-left: 3px solid #34d399; }
 .metric-fail { border-left: 3px solid #f87171; }
@@ -179,7 +187,8 @@ button[data-testid="stExpandSidebarButton"] { display: none !important; }
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 [data-testid="stDataFrame"] {
     border-radius: 14px; overflow: hidden;
-    border: 1px solid #1a1a1a !important;
+    background: rgba(30, 41, 59, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 thead tr th {
     background: #0a0a0a !important; color: #5a6f8a !important; font-size: 10px !important;
@@ -187,10 +196,13 @@ thead tr th {
     font-weight: 700 !important; padding: 12px 16px !important;
 }
 tbody tr td {
-    background: #050505 !important; color: #e2e8f0 !important; font-size: 13px !important;
-    border-color: #1a1a1a !important; padding: 10px 16px !important;
+    background: rgba(15, 23, 42, 0.5) !important; color: #e2e8f0 !important; font-size: 13px !important;
+    border-color: rgba(255, 255, 255, 0.03) !important; padding: 10px 16px !important;
 }
-tbody tr:hover td { background: #111111 !important; }
+tbody tr:nth-child(even) td {
+    background: rgba(30, 41, 59, 0.2) !important;
+}
+tbody tr:hover td { background: rgba(59, 130, 246, 0.1) !important; }
 
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ALL INPUTS (text, number, textarea, select, date)
@@ -478,8 +490,47 @@ hr { border-color: #1a1a1a !important; margin: 28px 0 !important; }
 [data-testid="stPlotlyChart"] {
     border-radius: 14px;
     overflow: hidden;
-    border: 1px solid #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.05);
 }
+
+/* Grid Layouts corporativos */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 20px;
+}
+@media (max-width: 900px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+.health-bar-container {
+    display: flex;
+    gap: 4px;
+    margin-top: 10px;
+}
+.health-segment {
+    flex: 1;
+    height: 8px;
+    border-radius: 2px;
+    background-color: #1e293b;
+}
+.health-active-1 { background-color: #ef4444; }
+.health-active-2 { background-color: #f59e0b; }
+.health-active-3 { background-color: #eab308; }
+.health-active-4 { background-color: #84cc16; }
+.health-active-5 { background-color: #10b981; }
+
+.signal-badge {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    display: inline-block;
+}
+.signal-buy { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+.signal-sell { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+.signal-hold { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
 
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    CAPTION / SMALL TEXT

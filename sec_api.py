@@ -25,7 +25,7 @@ from typing import Optional, Dict, Any, List
 
 # ─── Configuración ────────────────────────────────────────────────────────────
 SEC_HEADERS = {
-    "User-Agent": "QuantumTerminal carlosdaniloangaritagarcia2@gmail.com",
+    "User-Agent": "QuantumTerminal (carlosdaniloangaritagarcia2@gmail.com)",
     "Accept-Encoding": "gzip, deflate",
 }
 _RATE_LIMIT_DELAY = 0.12  # ~8 req/s para mantener margen con el límite de 10/s
@@ -460,3 +460,107 @@ def get_historical_financials(ticker: str, years: int = 5) -> pd.DataFrame:
     result = pd.DataFrame(list(all_data.values()))
     result = result.sort_values("Year", ascending=True)
     return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. SMART MONEY — Formularios 4 y Operaciones Insider
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_insider_trades(ticker: str, limit: int = 15) -> pd.DataFrame:
+    """
+    Rastrea las operaciones de insiders directos (CEO, Directores) buscando 
+    el "Formulario 4" en la lista de submissions de la empresa.
+    """
+    subs = get_company_submissions(ticker)
+    if subs is None:
+        return pd.DataFrame()
+
+    filings = subs.get("recent_filings")
+    if filings is None or filings.empty:
+        return pd.DataFrame()
+
+    # Filtrar solo Formulario 4
+    form4 = filings[filings["form"] == "4"].head(limit).copy()
+    if form4.empty:
+        return pd.DataFrame()
+
+    cik = subs["cik"].lstrip("0")
+    
+    # Construir el link directo del documento en SEC EDGAR
+    urls = []
+    for _, row in form4.iterrows():
+        acc = str(row["accession_number"]).replace("-", "")
+        # Link primario html index
+        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{row['primary_document']}"
+        urls.append(url)
+
+    form4["document_url"] = urls
+    
+    # Renombrar para legibilidad de UI
+    form4 = form4.rename(columns={
+        "filing_date": "Fecha", 
+        "description": "Descripción", 
+        "form": "Formulario"
+    })
+    
+    return form4[["Fecha", "Formulario", "Descripción", "document_url"]]
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_detailed_insider_transactions(ticker: str) -> pd.DataFrame:
+    """
+    Rastrea transacciones de insiders (Formulario 4) filtrando por adquisiciones/disposiciones.
+    Nota: Parsear el XML completo es complejo por red, así que recolectamos los meta-datos
+    disponibles en los filings recientes y pre-procesamos los links.
+    """
+    df_trades = get_insider_trades(ticker, limit=40)
+    if df_trades.empty:
+        return pd.DataFrame()
+    
+    # Intentamos identificar si es Compra o Venta por la descripción
+    # Normalmente la SEC pone "Statement of changes in beneficial ownership of securities"
+    # Para ver si compró o vendió necesitamos el XML, pero podemos agrupar filings recientes.
+    
+    return df_trades
+
+def get_short_interest_data(ticker: str) -> Dict[str, Any]:
+    """
+    Obtiene datos de Short Interest combinando YFinance (float %) y 
+    estimaciones de volumen de short consolidado.
+    """
+    import yfinance as yf
+    tk = yf.Ticker(ticker)
+    info = tk.info
+    
+    return {
+        "short_percent_float": info.get("shortPercentOfFloat", 0) * 100,
+        "short_ratio": info.get("shortRatio", 0),
+        "shares_short": info.get("sharesShort", 0),
+        "shares_float": info.get("floatShares", 0),
+        "date": info.get("dateShortInterest", "")
+    }
+@st.cache_data(ttl=3600, show_spinner=False)
+def search_whale_activity(ticker: str, limit: int = 10) -> pd.DataFrame:
+    """
+    Search for 13F (Hedge Funds), 13D/G (5% ownership) filings.
+    """
+    subs = get_company_submissions(ticker)
+    if not subs: return pd.DataFrame()
+    
+    filings = subs.get("recent_filings")
+    if filings.empty: return pd.DataFrame()
+    
+    # Whale forms
+    whale_forms = ["13F-HR", "13D", "13G", "SC 13D", "SC 13G"]
+    filtered = filings[filings["form"].isin(whale_forms)].head(limit).copy()
+    
+    if filtered.empty: return pd.DataFrame()
+    
+    cik = subs["cik"].lstrip("0")
+    urls = []
+    for _, row in filtered.iterrows():
+        acc = str(row["accession_number"]).replace("-", "")
+        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{row['primary_document']}"
+        urls.append(url)
+        
+    filtered["document_url"] = urls
+    return filtered

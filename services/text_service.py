@@ -9,7 +9,7 @@ from balancer import pick, record, PROVIDERS
 # ---------------------------------------------------------------------------
 # Provider chains
 # ---------------------------------------------------------------------------
-TEXT_CHAIN = ["groq-llama", "deepseek-chat", "gemini-flash", "or-qwen", "or-deepseek"]
+TEXT_CHAIN = ["groq-llama", "deepseek-chat", "gemini-flash", "or-qwen", "or-deepseek", "local-llama"]
 REASONING_CHAIN = ["deepseek-reasoner", "deepseek-chat", "gemini-flash", "or-deepseek"]
 
 # ---------------------------------------------------------------------------
@@ -43,15 +43,19 @@ def _get_backend(provider_id):
 # Core generation
 # ---------------------------------------------------------------------------
 def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500, tools=None):
-    """Generate text using the TEXT_CHAIN fallback sequence.
+    """Generate text using the TEXT_CHAIN fallback sequence, or a forced provider if set."""
+    import streamlit as st
+    
+    # ── AI BYPASS LOGIC ──────────────────────────────────────────────────────
+    forced_id = st.session_state.get("force_llm", "Auto-Balanceador")
+    active_chain = TEXT_CHAIN
+    
+    if forced_id != "Auto-Balanceador" and forced_id in PROVIDERS:
+        # Prepend the forced ID to ensure it's tried first
+        active_chain = [forced_id] + [p for p in TEXT_CHAIN if p != forced_id]
 
-    Returns
-    -------
-    tuple[str | None, str]
-        (generated_text, provider_id_used)
-    """
     errors = []
-    for pid in TEXT_CHAIN:
+    for pid in active_chain:
         provider = PROVIDERS.get(pid)
         if not provider:
             continue

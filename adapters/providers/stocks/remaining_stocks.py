@@ -16,7 +16,7 @@ from adapters.registry import register
 class MarketstackAdapter(RestMixin, BaseDataAdapter):
     config = ProviderConfig(
         provider_id="marketstack", category="stocks",
-        credential_key="MARKETSTACK_KEY",
+        credential_key="MARKET_STOCK_API_KEY",
         base_url="http://api.marketstack.com/v1",
         rate_limit_rpm=10, ttl_seconds=300, priority="medium",
     )

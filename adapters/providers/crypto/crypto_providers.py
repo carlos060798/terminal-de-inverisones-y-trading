@@ -152,7 +152,7 @@ class MessariAdapter(LibraryMixin, BaseDataAdapter):
     _lib_name = "messari.messari"
     config = ProviderConfig(
         provider_id="messari", category="crypto",
-        credential_key="MESSARI_KEY",
+        credential_key="MESSARI_API_KEY",
         rate_limit_rpm=20, ttl_seconds=3600, priority="low",
     )
 

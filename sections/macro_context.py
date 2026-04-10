@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from ui_shared import DARK, dark_layout, fmt, kpi
 import ai_engine
 import database as db
+from finterm import charts as fc
 
 # Try FRED
 try:
@@ -62,6 +63,40 @@ def _yf_yield_curve():
         except Exception:
             continue
     return data
+
+
+def _fred_liquidity_data(fred):
+    """Extrae indicadores de Liquidez y Riesgo Sistémico desde FRED."""
+    if fred is None:
+        return {}
+    
+    indicators = {
+        "WALCL": "Balance de la Reserva Federal (Total Assets)",
+        "M2SL": "Oferta Monetaria M2 Real",
+        "BAMLH0A0HYM2": "Spread Bonos Basura (Riesgo Crédito)",
+        "UNRATE": "Tasa de Desempleo (Sahm Rule)"
+    }
+    
+    results = {}
+    for series_id, name in indicators.items():
+        try:
+            # Obtener el último año para trazar tendencia
+            s = fred.get_series(series_id, observation_start=datetime.now() - timedelta(days=365))
+            if not s.empty:
+                s_clean = s.dropna()
+                if not s_clean.empty:
+                    results[series_id] = {
+                        "name": name,
+                        "current": s_clean.iloc[-1],
+                        "previous": s_clean.iloc[-2] if len(s_clean) > 1 else s_clean.iloc[-1],
+                        "history": s_clean
+                    }
+        except Exception as e:
+            print(f"[FRED] Error en {series_id}: {e}")
+            continue
+            
+    return results
+
 
 
 def _interpret_yield_curve(data):
@@ -269,22 +304,17 @@ def _render_economic_calendar(fred):
                     observation_start=datetime.now() - timedelta(days=365 * 3)
                 )
                 if hist is not None and not hist.empty:
-                    fig = go.Figure(go.Scatter(
-                        x=hist.index, y=hist.values, mode="lines",
-                        line=dict(color="#3b82f6", width=2)
-                    ))
-                    fig.update_layout(**dark_layout(
-                        height=300,
-                        title=dict(
-                            text=f"{series_id} \u2014 \u00daltimos 3 a\u00f1os",
-                            font=dict(color="#94a3b8")
-                        )
-                    ))
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig = fc.create_historical_chart(hist, f"{selected_event} ({series_id})")
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(f"No se pudo generar el gráfico para {series_id}")
+                else:
+                    st.warning(f"No hay datos históricos para {series_id}")
             except Exception as e:
-                st.warning(f"No se pudo cargar {series_id}: {e}")
+                st.warning(f"Error cargando {series_id}: {e}")
     elif not fred:
-        st.info("Conecta tu API key de FRED para ver series hist\u00f3ricas de cada evento.")
+        st.info("Conecta tu API key de FRED para ver series históricas de cada evento.")
 
 
 def render():
@@ -315,13 +345,78 @@ def render():
           y agrégala en <code>.streamlit/secrets.toml</code>
         </div>""", unsafe_allow_html=True)
 
-    tab_cmv, tab_yield, tab_macro, tab_global, tab_vix, tab_fx, tab_cal = st.tabs([
-        "🎯 CMV Score", "📈 Yield Curve", "📊 Indicadores Macro", "🌍 Contexto Global (WB)", 
+    tab_liq, tab_cmv, tab_yield, tab_macro, tab_global, tab_vix, tab_fx, tab_cal = st.tabs([
+        "🌊 Liquidez & Riesgo", "🎯 CMV Score", "📈 Yield Curve", "📊 Indicadores Macro", "🌍 Contexto Global (WB)", 
         "😰 VIX & Sentimiento", "💱 Monitor de Divisas", "📅 Calendario Económico"
     ])
 
     # ══════════════════════════════════════════════════════════════
-    # TAB 0: CMV SCORE (VALORACIÓN AGREGADA)
+    # TAB 0: LIQUIDEZ Y RIESGO SISTÉMICO (MACRO M2 / WALCL)
+    # ══════════════════════════════════════════════════════════════
+    with tab_liq:
+        st.markdown("<div class='sec-title'>Radar de Liquidez de la FED & Riesgo Sistémico</div>", unsafe_allow_html=True)
+        if using_fred:
+            with st.spinner("Descargando data de Liquidez (M2, WALCL, Sahm Rule)..."):
+                liq_data = _fred_liquidity_data(fred)
+            
+            if liq_data:
+                lk1, lk2, lk3, lk4 = st.columns(4)
+                
+                # M2SL
+                m2 = liq_data.get("M2SL", {})
+                if m2:
+                    val = m2['current']
+                    pct = ((val - m2['previous']) / m2['previous']) * 100
+                    c = "green" if pct > 0 else "red"
+                    lk1.markdown(kpi("M2 Money Supply", f"${val:,.0f}B", f"{pct:+.2f}%", c), unsafe_allow_html=True)
+                
+                # WALCL
+                walcl = liq_data.get("WALCL", {})
+                if walcl:
+                    val = walcl['current'] / 1000 # Convert to Billions
+                    prev = walcl['previous'] / 1000
+                    pct = ((val - prev) / prev) * 100
+                    c = "green" if pct > 0 else "red"
+                    lk2.markdown(kpi("Balance FED (WALCL)", f"${val:,.0f}B", f"{pct:+.2f}%", c), unsafe_allow_html=True)
+                
+                # BAMLH0A0HYM2 (High Yield Spread)
+                hy = liq_data.get("BAMLH0A0HYM2", {})
+                if hy:
+                    val = hy['current']
+                    prev = hy['previous']
+                    pct = val - prev
+                    c = "red" if pct > 0 else "green" # Riesgo sube es malo
+                    lk3.markdown(kpi("Spread Bonos Basura", f"{val:,.2f}%", f"{pct:+.2f} bps", c), unsafe_allow_html=True)
+
+                # UNRATE (Desempleo)
+                unr = liq_data.get("UNRATE", {})
+                if unr:
+                    val = unr['current']
+                    prev = unr['previous']
+                    pct = val - prev
+                    c = "red" if pct > 0 else "green"
+                    lk4.markdown(kpi("Tasa Desempleo", f"{val:,.1f}%", f"{pct:+.1f}% Sahm", c), unsafe_allow_html=True)
+                
+                # Graficar WALCL (Inyección de Dinero)
+                if walcl:
+                    hist = walcl['history']
+                    fig_walcl = go.Figure()
+                    fig_walcl.add_trace(go.Scatter(
+                        x=hist.index, y=hist.values / 1000, mode="lines",
+                        line=dict(color="#10b981", width=2),
+                        fill="tozeroy", fillcolor="rgba(16,185,129,0.1)",
+                    ))
+                    fig_walcl.update_layout(**DARK, height=350,
+                        title="Impresión de Dinero: Balance Total de la FED (Billones USD)",
+                        yaxis_title="Billones ($)", showlegend=False)
+                    st.plotly_chart(fig_walcl, use_container_width=True)
+            else:
+                st.warning("No se pudo obtener datos de Liquidez desde FRED API.")
+        else:
+            st.error("Rastreo de Inyección M2 y Balance FED requiere una API Key gratuita de FRED.")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 1: CMV SCORE (VALORACIÓN AGREGADA)
     # ══════════════════════════════════════════════════════════════
     with tab_cmv:
         import services.macro_indicators as macro_indicators
@@ -407,42 +502,19 @@ def render():
             if "30Y" in yc_data:
                 yk4.markdown(kpi("Treasury 30Y", f"{yc_data['30Y']:.2f}%", "", "purple"), unsafe_allow_html=True)
 
-            # Yield curve chart
-            fig_yc = go.Figure()
-            labels = list(yc_data.keys())
-            values = list(yc_data.values())
-            fig_yc.add_trace(go.Scatter(
-                x=labels, y=values, mode="lines+markers",
-                line=dict(color="#60a5fa", width=3),
-                marker=dict(size=10, color="#60a5fa"),
-                fill="tozeroy", fillcolor="rgba(96,165,250,0.08)",
-                text=[f"{v:.2f}%" for v in values],
-                textposition="top center",
-                textfont=dict(color="#94a3b8", size=11),
-            ))
-            fig_yc.update_layout(**DARK, height=400,
-                title=dict(text="Curva de Rendimiento del Tesoro de EE.UU.",
-                          font=dict(color="#94a3b8", size=14), x=0.5),
-                yaxis_title="Rendimiento (%)",
-                xaxis_title="Plazo",
-                showlegend=False)
-            st.plotly_chart(fig_yc, use_container_width=True)
+            # Usamos el componente institucional de curva de rendimientos
+            fig_yc = fc.create_yield_curve_chart(yc_data)
+            if fig_yc:
+                st.plotly_chart(fig_yc, use_container_width=True)
+            else:
+                st.warning("No se pudo generar el gráfico de la curva de rendimientos.")
 
             # Historical 10Y if FRED
             if using_fred:
                 try:
                     hist_10y = fred.get_series("GS10", observation_start=datetime.now() - timedelta(days=365*2))
                     if not hist_10y.empty:
-                        fig_10y = go.Figure()
-                        fig_10y.add_trace(go.Scatter(
-                            x=hist_10y.index, y=hist_10y.values,
-                            mode="lines", line=dict(color="#a78bfa", width=1.5),
-                            fill="tozeroy", fillcolor="rgba(167,139,250,0.06)",
-                        ))
-                        fig_10y.update_layout(**DARK, height=280,
-                            title=dict(text="Treasury 10Y — Últimos 2 años",
-                                      font=dict(color="#94a3b8", size=13), x=0.5),
-                            yaxis_title="%", showlegend=False)
+                        fig_10y = fc.create_historical_chart(hist_10y, "Treasury 10Y — Últimos 2 años", color="#a78bfa")
                         st.plotly_chart(fig_10y, use_container_width=True)
                 except Exception:
                     pass
@@ -454,51 +526,36 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_macro:
         if using_fred:
-            with st.spinner("Cargando indicadores macro…"):
-                macro_series = {
-                    "CPI (Inflación)": ("CPIAUCSL", "Índice de Precios al Consumidor", "#f87171"),
-                    "Desempleo": ("UNRATE", "Tasa de Desempleo (%)", "#fbbf24"),
-                    "Fed Funds Rate": ("FEDFUNDS", "Tasa de Fondos Federales (%)", "#60a5fa"),
+            with st.spinner("Cargando indicadores macro..."):
+                # Preparamos el diccionario de datos para el multi-chart
+                macro_data = {}
+                indicators_to_fetch = {
+                    "Fed Funds": "FEDFUNDS",
+                    "CPI Inflación %": "CPIAUCSL",
+                    "Tasa Desempleo": "UNRATE",
+                    "Liquidez M2": "M2SL"
                 }
-
-                # KPIs row
-                mk1, mk2, mk3 = st.columns(3)
-                kpi_cols = [mk1, mk2, mk3]
-
-                for i, (name, (series_id, desc, color)) in enumerate(macro_series.items()):
+                
+                for label, s_id in indicators_to_fetch.items():
                     try:
-                        data = fred.get_series(series_id,
-                                              observation_start=datetime.now() - timedelta(days=365*3))
-                        if not data.empty:
-                            latest = data.dropna().iloc[-1]
-                            prev_year = data.dropna().iloc[-13] if len(data) > 13 else latest
-
-                            if series_id == "CPIAUCSL":
-                                # CPI: show YoY % change
-                                yoy = ((latest - prev_year) / prev_year) * 100
-                                kpi_cols[i].markdown(kpi(name, f"{yoy:.1f}%",
-                                    "YoY" + (" ↓" if yoy < 3 else " ↑"), "green" if yoy < 3 else "red"),
-                                    unsafe_allow_html=True)
-                            else:
-                                kpi_cols[i].markdown(kpi(name, f"{latest:.2f}%", desc[:20],
-                                    "blue"), unsafe_allow_html=True)
-
-                            # Chart
-                            fig = go.Figure()
-                            fig.add_trace(go.Scatter(
-                                x=data.index, y=data.values,
-                                mode="lines", line=dict(color=color, width=1.5),
-                                fill="tozeroy", fillcolor=f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.06)",
-                            ))
-                            fig.update_layout(**dark_layout(height=250,
-                                title=dict(text=f"{name} — 3 años",
-                                          font=dict(color="#94a3b8", size=12), x=0.5),
-                                showlegend=False, margin=dict(l=40, r=20, t=40, b=30)))
-                            st.plotly_chart(fig, use_container_width=True)
-                    except Exception as e:
-                        st.warning(f"Error cargando {name}: {e}")
+                        s = fred.get_series(s_id, observation_start=datetime.now() - timedelta(days=365*4))
+                        if not s.empty:
+                            if label == "CPI Inflación %":
+                                # Convertir CPI a YoY
+                                s = s.pct_change(12).dropna() * 100
+                            macro_data[label] = s
+                    except: continue
+                
+                if macro_data:
+                    fig_multi = fc.create_macro_multi_chart(macro_data)
+                    if fig_multi:
+                        st.plotly_chart(fig_multi, use_container_width=True)
+                    else:
+                        st.warning("Error al procesar los indicadores macro para visualización.")
+                else:
+                    st.warning("No se pudieron cargar los datos macro (posible error de conexión o API Key inválida).")
         else:
-            st.info("Los indicadores macro detallados (CPI, desempleo, Fed Funds) requieren una API key de FRED (gratis).")
+            st.info("Indicadores macro (CPI, Desempleo, Fed Funds) requieren API Key de FRED.")
             st.markdown("""
             **Cómo obtener tu key gratuita:**
             1. Ve a [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html)
@@ -537,7 +594,7 @@ def render():
                         text=latest_data['value'].apply(lambda x: f"{x:.1f}%"),
                         textposition='auto',
                     ))
-                    fig_wb.update_layout(**DARK, height=350, margin=dict(l=0, r=0, t=30, b=0),
+                    fig_wb.update_layout(dark_layout(height=350, margin=dict(l=0, r=0, t=30, b=0)),
                                         title=dict(text=f"{sel_ind} (% Anual) - Año {latest_year}", 
                                                   font=dict(size=14, color="#94a3b8")))
                     st.plotly_chart(fig_wb, use_container_width=True)
