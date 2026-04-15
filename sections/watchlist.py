@@ -64,10 +64,12 @@ def render():
   </div>
 </div>""", unsafe_allow_html=True)
 
+    p_id = st.session_state.get("active_portfolio_id", 1)
+    
     # ── Portfolio Lists ──
     list_col1, list_col2, list_col3 = st.columns([3, 2, 1])
     with list_col1:
-        available_lists = db.get_watchlist_lists()
+        available_lists = db.get_watchlist_lists(portfolio_id=p_id)
         options = ['Todas'] + available_lists
         active_list = st.selectbox("📂 Lista activa", options, key="active_list_select")
     with list_col2:
@@ -79,9 +81,9 @@ def render():
 
     # Use active_list to filter data throughout
     if active_list == 'Todas':
-        watchlist_data = db.get_watchlist()
+        watchlist_data = db.get_watchlist(portfolio_id=p_id)
     else:
-        watchlist_data = db.get_watchlist_by_list(active_list)
+        watchlist_data = db.get_watchlist_by_list(active_list, portfolio_id=p_id)
 
     # ── TABS ──
     (tab_port, tab_chart, tab_bench, tab_div, tab_calc, tab_corr, tab_earn, tab_sim,
@@ -118,7 +120,7 @@ def render():
                         # Handle 0 as None for SL/TP
                         sl_val = new_sl if new_sl > 0 else None
                         tp_val = new_tp if new_tp > 0 else None
-                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes, target, sl_val, tp_val)
+                        db.add_ticker(new_tick.strip(), new_share, new_cost, new_sect, new_notes, target, sl_val, tp_val, portfolio_id=p_id)
                         st.success(f"✅ {new_tick.upper()} agregado a '{target}'.")
                         st.rerun()
 
@@ -157,7 +159,7 @@ def render():
                         sector_col = st.selectbox("Columna Sector", all_cols,
                             index=all_cols.index(sector_candidates[0]) if sector_candidates else 0, key="map_sector")
 
-                    target_list = st.selectbox("Importar a lista:", db.get_watchlist_lists(), key="import_target_list")
+                    target_list = st.selectbox("Importar a lista:", db.get_watchlist_lists(portfolio_id=p_id), key="import_target_list")
 
                     if st.button("🚀 Importar", key="btn_import_excel"):
                         if ticker_col == '(ninguna)':
@@ -181,7 +183,7 @@ def render():
                                     except (ValueError, TypeError):
                                         price_val = 0
                                     sector_val = str(row[sector_col]).strip() if sector_col != '(ninguna)' and pd.notna(row.get(sector_col)) else ''
-                                    db.add_ticker(ticker_val, shares_val, price_val, sector_val, '', target_list)
+                                    db.add_ticker(ticker_val, shares_val, price_val, sector_val, '', target_list, portfolio_id=p_id)
                                     imported += 1
                                 except Exception:
                                     errors += 1
@@ -254,7 +256,178 @@ def render():
         with k4:
             vc.render_metric_card("Mejor Posición", best_pos, subtitle="Máximo retorno")
 
-        st.markdown("<div class='sec-title'>Tabla de Posiciones</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <style>
+            .watchlist-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                gap: 20px;
+                padding: 10px 0;
+            }
+            .ticker-card {
+                background: rgba(30, 41, 59, 0.4);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 18px;
+                padding: 20px;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .ticker-card:hover {
+                border-color: rgba(59, 130, 246, 0.5);
+                transform: translateY(-5px);
+                background: rgba(30, 41, 59, 0.6);
+                box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.5);
+            }
+            .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 15px;
+            }
+            .symbol-box {
+                display: flex;
+                flex-direction: column;
+            }
+            .card-symbol {
+                font-size: 18px;
+                font-weight: 800;
+                color: #ffffff;
+                letter-spacing: -0.5px;
+            }
+            .card-sector {
+                font-size: 10px;
+                color: #64748b;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .price-tag {
+                font-size: 18px;
+                font-weight: 700;
+                color: #f8fafc;
+                text-align: right;
+            }
+            .change-tag {
+                font-size: 12px;
+                font-weight: 600;
+                padding: 2px 8px;
+                border-radius: 6px;
+                margin-top: 4px;
+                display: inline-block;
+            }
+            .chg-pos { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+            .chg-neg { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+            
+            .card-metrics {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin: 15px 0;
+                padding: 12px 0;
+                border-top: 1px solid rgba(255,255,255,0.05);
+            }
+            .m-item {
+                display: flex;
+                flex-direction: column;
+            }
+            .m-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .m-value { font-size: 12px; font-weight: 600; color: #e2e8f0; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<div class='sec-title'>Live Watchlist Grid</div>", unsafe_allow_html=True)
+        
+        # Grid rendering
+        cols_per_row = 3
+        for i in range(0, len(df), cols_per_row):
+            batch = df.iloc[i:i+cols_per_row]
+            cols = st.columns(cols_per_row)
+            for idx, (row_idx, row) in enumerate(batch.iterrows()):
+                with cols[idx]:
+                    chg_cls = "chg-pos" if row["Cambio %"] >= 0 else "chg-neg"
+                    chg_icon = "↑" if row["Cambio %"] >= 0 else "↓"
+                    pnl_color = "#10b981" if row["P&L $"] >= 0 else "#ef4444"
+                    
+                    # Custom Card HTML
+                    st.markdown(f"""
+                    <div class="ticker-card">
+                        <div class="card-header">
+                            <div class="symbol-box">
+                                <span class="card-symbol">{row['ticker']}</span>
+                                <span class="card-sector">{row['sector'] or 'GENERAL'}</span>
+                            </div>
+                            <div style="text-align:right">
+                                <div class="price-tag">${row['Precio']:,.2f}</div>
+                                <div class="change-tag {chg_cls}">{chg_icon} {abs(row['Cambio %']):.2f}%</div>
+                            </div>
+                        </div>
+                        
+                        <div class="card-metrics">
+                            <div class="m-item">
+                                <span class="m-label">POSICIÓN</span>
+                                <span class="m-value">{row['shares']} shares</span>
+                            </div>
+                            <div class="m-item">
+                                <span class="m-label">VALOR TOTAL</span>
+                                <span class="m-value" style="color:#60a5fa">${row['Valor']:,.0f}</span>
+                            </div>
+                            <div class="m-item">
+                                <span class="m-label">P&L TOTAL</span>
+                                <span class="m-value" style="color:{pnl_color}">${row['P&L $']:+,.2f}</span>
+                            </div>
+                            <div class="m-item">
+                                <span class="m-label">RETORNO</span>
+                                <span class="m-value" style="color:{pnl_color}">{row['P&L %']:+.2f}%</span>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Sparkline using Plotly for each card
+                    if len(row['Tendencia']) > 0:
+                        fig_spark = go.Figure()
+                        fig_spark.add_trace(go.Scatter(
+                            y=row['Tendencia'],
+                            mode='lines',
+                            fill='tozeroy',
+                            line=dict(color=pnl_color, width=2),
+                            fillcolor=f"rgba({ '16, 185, 129' if row['P&L $'] >= 0 else '239, 68, 68' }, 0.1)",
+                        ))
+                        fig_spark.update_layout(
+                            **DARK,
+                            height=60,
+                            margin=dict(l=0, r=0, t=0, b=0),
+                            xaxis=dict(visible=False),
+                            yaxis=dict(visible=False),
+                            showlegend=False,
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)'
+                        )
+                        st.plotly_chart(fig_spark, use_container_width=True, config={'displayModeBar': False})
+
+        # ── EXPORT & AI ──
+        st.markdown("<br>", unsafe_allow_html=True)
+        exp_col1, exp_col2 = st.columns([1, 1])
+        with exp_col1:
+            if st.button("🤖 Generar Análisis Estratégico IA", use_container_width=True):
+                from services.text_service import analyze_portfolio
+                # Convert DF to list of dicts for the service
+                pos_dicts = df.to_dict('records')
+                with st.spinner("Modelos de IA analizando cartera estratégica..."):
+                    res_ai, provider = analyze_portfolio(pos_dicts)
+                    if res_ai:
+                        st.session_state["portfolio_ai_cache"] = res_ai
+                        st.session_state["portfolio_ai_provider"] = provider
+        
+        if "portfolio_ai_cache" in st.session_state:
+             prov_lbl = st.session_state.get("portfolio_ai_provider", "IA")
+             st.markdown(f"""
+            <div style="background:rgba(16, 185, 129, 0.05); border:1px solid rgba(16, 185, 129, 0.2); padding:20px; border-radius:12px; margin-bottom:20px;">
+                <div style="color:#10b981; font-size:12px; font-weight:800; text-transform:uppercase; margin-bottom:10px;">🤖 Quantum Portfolio Intelligence ({prov_lbl})</div>
+                <div style="color:#e2e8f0; font-size:13px; line-height:1.6;">{st.session_state["portfolio_ai_cache"]}</div>
+            </div>
+            """, unsafe_allow_html=True)
         
         # ── EXPORT BUTTONS ────────────────────────────────────────────────────────
         from utils import export_utils
@@ -274,37 +447,38 @@ def render():
 
         df["Health"] = df.apply(_calc_health, axis=1)
         
-        tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "Tendencia", "stop_loss", "take_profit", "Health", "Valor", "P&L $", "P&L %"]].copy()
-        tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "Tendencia (30d)", "SL", "TP", "Trade Health", "Valor ($)", "P&L ($)", "P&L %"]
+        with st.expander("📝 Ver Tabla Detallada (Legacy View)"):
+            tbl = df[["ticker", "sector", "shares", "avg_cost", "Precio", "Cambio %", "Tendencia", "stop_loss", "take_profit", "Health", "Valor", "P&L $", "P&L %"]].copy()
+            tbl.columns = ["Ticker", "Sector", "Acciones", "Costo Prom.", "Precio", "Cambio %", "Tendencia (30d)", "SL", "TP", "Trade Health", "Valor ($)", "P&L ($)", "P&L %"]
 
-        def clr(v):
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                return "color:#475569"
-            return "color:#34d399" if v >= 0 else "color:#f87171"
+            def clr(v):
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    return "color:#475569"
+                return "color:#34d399" if v >= 0 else "color:#f87171"
 
-        st.dataframe(
-            tbl.style.map(clr, subset=["Cambio %", "P&L ($)", "P&L %"])
-                     .format({"Costo Prom.": "${:.2f}", "Precio": "${:.2f}", "Cambio %": "{:+.2f}%",
-                              "SL": "${:.2f}", "TP": "${:.2f}",
-                              "Valor ($)": "${:,.0f}", "P&L ($)": "${:+,.0f}", "P&L %": "{:+.2f}%", "Acciones": "{:.2f}"},
-                              na_rep="—"),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "Tendencia (30d)": st.column_config.AreaChartColumn(
-                    "Tendencia (30d)",
-                    help="Evolución del precio último mes",
-                    width="medium"
-                ),
-                "Trade Health": st.column_config.ProgressColumn(
-                    "Estado Trade (SL→TP)",
-                    help="Posición del precio respecto al SL (0%) y TP (100%)",
-                    format="%.2f",
-                    min_value=0,
-                    max_value=1,
-                    width="medium"
-                )
-            }
-        )
+            st.dataframe(
+                tbl.style.map(clr, subset=["Cambio %", "P&L ($)", "P&L %"])
+                         .format({"Costo Prom.": "${:.2f}", "Precio": "${:.2f}", "Cambio %": "{:+.2f}%",
+                                  "SL": "${:.2f}", "TP": "${:.2f}",
+                                  "Valor ($)": "${:,.0f}", "P&L ($)": "${:+,.0f}", "P&L %": "{:+.2f}%", "Acciones": "{:.2f}"},
+                                  na_rep="—"),
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Tendencia (30d)": st.column_config.AreaChartColumn(
+                        "Tendencia (30d)",
+                        help="Evolución del precio último mes",
+                        width="medium"
+                    ),
+                    "Trade Health": st.column_config.ProgressColumn(
+                        "Estado Trade (SL→TP)",
+                        help="Posición del precio respecto al SL (0%) y TP (100%)",
+                        format="%.2f",
+                        min_value=0,
+                        max_value=1,
+                        width="medium"
+                    )
+                }
+            )
 
         # ── Charts ──
         st.markdown("<div class='sec-title'>Distribución & Performance</div>", unsafe_allow_html=True)
@@ -362,6 +536,7 @@ def render():
                                 float(row_data.get("avg_cost", 0)),
                                 str(row_data.get("sector", "")),
                                 new_notes,
+                                portfolio_id=p_id
                             )
                             st.success(f"Notas guardadas para {note_ticker}.")
                             st.rerun()
@@ -375,7 +550,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_chart:
         import streamlit.components.v1 as components
-        wl2 = db.get_watchlist()
+        wl2 = db.get_watchlist(portfolio_id=p_id)
         if wl2.empty:
             st.info("Agrega tickers a tu watchlist primero.")
             return
@@ -456,7 +631,7 @@ def render():
 
                 adv_indicators = st.multiselect(
                     "Seleccionar indicadores",
-                    ["Ichimoku Cloud", "ADX", "Stochastic", "ATR", "OBV"],
+                    ["Ichimoku Cloud", "ADX", "Stochastic", "ATR", "OBV", "Volume Profile (VPVR)", "Volume Delta"],
                     default=["ADX", "Stochastic"],
                     key="adv_ta_indicators"
                 )
@@ -583,6 +758,42 @@ def render():
                                             showlegend=False)
                                         st.plotly_chart(fig_obv, use_container_width=True)
 
+                                elif indicator == "Volume Profile (VPVR)":
+                                    close_col = adv_data["Close"]
+                                    vol_col = adv_data["Volume"]
+                                    if not close_col.empty and not vol_col.empty:
+                                        min_p, max_p = close_col.min(), close_col.max()
+                                        bins = pd.cut(close_col, bins=50)
+                                        vp = vol_col.groupby(bins).sum()
+                                        vp.index = vp.index.map(lambda x: x.mid)
+                                        fig_vp = go.Figure()
+                                        fig_vp.add_trace(go.Bar(
+                                            x=vp.values, y=vp.index, orientation='h',
+                                            marker=dict(color='rgba(96, 165, 250, 0.4)', line=dict(color='rgba(96, 165, 250, 0.8)', width=1)),
+                                            name="VPVR"
+                                        ))
+                                        fig_vp.update_layout(**DARK, height=400,
+                                            title=dict(text=f"Volume Profile (VPVR) — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5), showlegend=False)
+                                        st.plotly_chart(fig_vp, use_container_width=True)
+
+                                elif indicator == "Volume Delta":
+                                    c_col, o_col, v_col = adv_data["Close"], adv_data["Open"], adv_data["Volume"]
+                                    if not c_col.empty and not o_col.empty and not v_col.empty:
+                                        deltas = []
+                                        colors = []
+                                        for i in range(len(c_col)):
+                                            if c_col.iloc[i] > o_col.iloc[i]:
+                                                deltas.append(v_col.iloc[i])
+                                                colors.append('#10b981')
+                                            else:
+                                                deltas.append(-v_col.iloc[i])
+                                                colors.append('#ef4444')
+                                        fig_vd = go.Figure()
+                                        fig_vd.add_trace(go.Bar(x=adv_data.index, y=deltas, marker_color=colors, name="Delta"))
+                                        fig_vd.update_layout(**DARK, height=300,
+                                            title=dict(text=f"Volume Delta — {adv_ticker}", font=dict(color="#94a3b8", size=13), x=0.5), showlegend=False)
+                                        st.plotly_chart(fig_vd, use_container_width=True)
+
                     except Exception as e:
                         st.error(f"Error calculando indicadores: {e}")
 
@@ -590,7 +801,7 @@ def render():
     # TAB 3: BENCHMARK vs S&P500
     # ══════════════════════════════════════════════════════════════
     with tab_bench:
-        wl3 = db.get_watchlist()
+        wl3 = db.get_watchlist(portfolio_id=p_id)
         if wl3.empty:
             st.info("Agrega tickers a tu watchlist primero.")
             return
@@ -662,7 +873,7 @@ def render():
     # TAB 4: DIVIDENDOS
     # ══════════════════════════════════════════════════════════════
     with tab_div:
-        wl4 = db.get_watchlist()
+        wl4 = db.get_watchlist(portfolio_id=p_id)
         if wl4.empty:
             st.info("Agrega tickers a tu watchlist primero.")
             return
@@ -958,7 +1169,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_corr:
         try:
-            wl_corr = db.get_watchlist()
+            wl_corr = db.get_watchlist(portfolio_id=p_id)
             if wl_corr.empty:
                 st.info("Agrega tickers a tu watchlist primero.")
             else:
@@ -994,7 +1205,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_earn:
         try:
-            wl_earn = db.get_watchlist()
+            wl_earn = db.get_watchlist(portfolio_id=p_id)
             if wl_earn.empty:
                 st.info("Agrega tickers a tu watchlist primero.")
             else:
@@ -1040,7 +1251,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_sim:
         try:
-            wl_sim = db.get_watchlist()
+            wl_sim = db.get_watchlist(portfolio_id=p_id)
             if wl_sim.empty:
                 st.info("Agrega tickers a tu watchlist primero.")
             else:
@@ -1130,7 +1341,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_opt:
         try:
-            rows = db.get_watchlist()
+            rows = db.get_watchlist(portfolio_id=p_id)
             if rows.empty:
                 st.info("Agrega al menos 2 tickers a tu watchlist para optimizar la cartera.")
             else:
@@ -1426,7 +1637,7 @@ def render():
     # ══════════════════════════════════════════════════════════════
     with tab_rebal:
         try:
-            wl_rebal = db.get_watchlist()
+            wl_rebal = db.get_watchlist(portfolio_id=p_id)
             if wl_rebal.empty:
                 st.info("Agrega tickers a tu watchlist primero.")
             else:
@@ -1726,7 +1937,7 @@ def render():
     # TAB 12: STRESS TEST (MONTE CARLO)
     # ══════════════════════════════════════════════════════════════
     with tab_stress:
-        wl_stress = db.get_watchlist()
+        wl_stress = db.get_watchlist(portfolio_id=p_id)
         if wl_stress.empty:
             st.info("Agrega tickers a tu watchlist primero.")
         else:
@@ -1828,7 +2039,7 @@ def render():
     # TAB 13: VOLUME PROFILE
     # ══════════════════════════════════════════════════════════════
     with tab_volprof:
-        wl_vp = db.get_watchlist()
+        wl_vp = db.get_watchlist(portfolio_id=p_id)
         if wl_vp.empty:
             st.info("Agrega tickers a tu watchlist primero.")
         else:
@@ -1905,7 +2116,7 @@ def render():
     # TAB 14: OPTIONS FLOW
     # ══════════════════════════════════════════════════════════════
     with tab_optflow:
-        wl_opt = db.get_watchlist()
+        wl_opt = db.get_watchlist(portfolio_id=p_id)
         if wl_opt.empty:
             st.info("Agrega tickers a tu watchlist primero.")
         else:
@@ -2057,7 +2268,7 @@ def render():
     # TAB 16: MAX PAIN
     # ══════════════════════════════════════════════════════════════
     with tab_maxpain:
-        wl_mp = db.get_watchlist()
+        wl_mp = db.get_watchlist(portfolio_id=p_id)
         st.markdown("<div class='sec-title'>⚡ Calculadora de Max Pain</div>", unsafe_allow_html=True)
         st.caption("El nivel de precio donde el mayor número de opciones expira sin valor. Los Market Makers suelen anclar el precio aquí durante las semanas de vencimiento.")
 
@@ -2136,7 +2347,7 @@ def render():
     # TAB 17: SHORT SQUEEZE RADAR
     # ══════════════════════════════════════════════════════════════
     with tab_squeeze:
-        wl_sq = db.get_watchlist()
+        wl_sq = db.get_watchlist(portfolio_id=p_id)
         st.markdown("<div class='sec-title'>🔀 Radar de Short Squeeze</div>", unsafe_allow_html=True)
         st.caption("Identifica acciones con alto interés en corto que pueden dispararse violentamente con volumen de compra sostenido.")
 
@@ -2207,7 +2418,7 @@ def render():
     # TAB 18: ESTACIONALIDAD HISTÓRICA
     # ══════════════════════════════════════════════════════════════
     with tab_seasonal:
-        wl_sea = db.get_watchlist()
+        wl_sea = db.get_watchlist(portfolio_id=p_id)
         st.markdown("<div class='sec-title'>📅 Estacionalidad Histórica</div>", unsafe_allow_html=True)
         st.caption("Patrón estadístico de retornos por mes, día de semana y trimestre. Identifica ventanas de sesgo alcista/bajista recurrente.")
 
@@ -2284,7 +2495,7 @@ def render():
     # TAB 19: PAIRS TRADING
     # ══════════════════════════════════════════════════════════════
     with tab_pairs:
-        wl_pt = db.get_watchlist()
+        wl_pt = db.get_watchlist(portfolio_id=p_id)
         st.markdown("<div class='sec-title'>🔗 Pairs Trading — Arbitraje Estadístico</div>", unsafe_allow_html=True)
         st.caption("Test de cointegración de Engle-Granger para identificar pares de activos con correlación mean-reverting y generar señales de spread.")
 

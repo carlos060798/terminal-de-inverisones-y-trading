@@ -1,0 +1,69 @@
+{
+    "ticker": "QCOM",
+    "source": "SEC EDGAR API (data.sec.gov)",
+    "revenue": 44284000000.0,
+    "net_income": 5541000000.0,
+    "total_assets": 50143000000.0,
+    "total_liabilities": 28937000000.0,
+    "stockholders_equity": 4909000000.0,
+    "eps_diluted": 5.01,
+    "operating_income": 12355000000.0,
+    "cash": 5520000000.0,
+    "long_term_debt": 14811000000.0,
+    "shares_outstanding": 1074000000.0,
+    "operating_cash_flow": 14012000000.0,
+    "capex": null,
+    "dividends_paid": 2055000000.0,
+    "current_assets": 25754000000.0,
+    "current_liabilities": 9144000000.0,
+    "gross_profit": null,
+    "revenue_history": [
+        [
+            2021,
+            33566000000.0
+        ],
+        [
+            2022,
+            44200000000.0
+        ],
+        [
+            2023,
+            35820000000.0
+        ],
+        [
+            2024,
+            38962000000.0
+        ],
+        [
+            2025,
+            44284000000.0
+        ]
+    ],
+    "net_income_history": [
+        [
+            2021,
+            9043000000.0
+        ],
+        [
+            2022,
+            12936000000.0
+        ],
+        [
+            2023,
+            7232000000.0
+        ],
+        [
+            2024,
+            10142000000.0
+        ],
+        [
+            2025,
+            5541000000.0
+        ]
+    ],
+    "fcf_history": [],
+    "error": null,
+    "company_name": "QUALCOMM INC/DE",
+    "sic_description": "Radio & Tv Broadcasting & Communications Equipment",
+    "fiscal_year_end": "0927"
+}

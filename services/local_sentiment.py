@@ -17,9 +17,9 @@ def get_sentiment(texts: list[str]) -> list[dict]:
         return [{"label": "neutral", "score": 1.0} for _ in texts]
 
 def analyze_ticker_sentiment(ticker: str, hours_back: int = 48) -> dict:
-    from services.news_scraper import news_for_ticker
+    from services.news_engine import fetch_ticker_news
     
-    news = news_for_ticker(ticker, hours_back=hours_back)
+    news = fetch_ticker_news(ticker, hours_back=hours_back)
     texts = [f"{n.title}. {n.summary[:200]}" for n in news]
 
     if not texts:

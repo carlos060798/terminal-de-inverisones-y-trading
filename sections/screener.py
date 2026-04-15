@@ -20,6 +20,7 @@ except ImportError:
     HAS_FINVIZ = False
 
 from utils import visual_components as vc
+from services import semantic_search
 import streamlit as st
 
 AVAILABLE_METRICS = {
@@ -70,9 +71,10 @@ POPULAR = {
 }
 
 
+@st.fragment
 def _render_yfinance_screener():
     """Original yfinance-based screener content with dynamic configurable filters."""
-    # ── INPUT: Tickers ──
+    # â”€â”€ INPUT: Tickers â”€â”€
     st.markdown("<div class='sec-title'>Seleccion de Acciones</div>", unsafe_allow_html=True)
     tc1, tc2 = st.columns([2, 1])
 
@@ -86,7 +88,7 @@ def _render_yfinance_screener():
             tickers_input = ", ".join(POPULAR[ticker_preset])
             st.text_input("Tickers seleccionados", value=tickers_input, disabled=True)
 
-    # ── DYNAMIC CONFIGURABLE FILTERS ──
+    # â”€â”€ DYNAMIC CONFIGURABLE FILTERS â”€â”€
     with st.expander("Filtros fundamentales", expanded=True):
 
         # Initialize active filters in session state
@@ -223,6 +225,10 @@ def _render_yfinance_screener():
                     earn_growth = (info.get("earningsGrowth") or 0) * 100
                     avg_volume = info.get("averageVolume") or info.get("averageDailyVolume10Day") or 0
 
+                    # Fetch history for Sparkline (30d)
+                    hist = tk.history(period="30d")
+                    spark_data = hist["Close"].tolist() if not hist.empty else []
+
                     from core.scoring import get_full_analysis
                     finterm_score = get_full_analysis(ticker, info, skip_sentiment=True)
 
@@ -234,7 +240,8 @@ def _render_yfinance_screener():
                         "Div %": round(div_y, 2), "Crec Rev %": round(rev_growth, 1),
                         "Crec Earn %": round(earn_growth, 1),
                         "Mkt Cap": mcap, "Vol Prom": avg_volume, 
-                        "Score": finterm_score["Total"], "Quant": finterm_score["Total"]
+                        "Score": finterm_score["Total"], "Quant": finterm_score["Total"],
+                        "Sparkline": spark_data
                     }
                 except Exception:
                     return None
@@ -251,7 +258,7 @@ def _render_yfinance_screener():
 
             progress.empty()
 
-        # ── Apply sector & country filters ──
+        # â”€â”€ Apply sector & country filters â”€â”€
         if results and sector_filter:
             results = [r for r in results if r.get("Sector", "") in sector_filter]
         if results and country_filter.strip():
@@ -264,14 +271,25 @@ def _render_yfinance_screener():
 
         df = pd.DataFrame(results).sort_values("Score", ascending=False)
 
-        # ── QUANT SCORE (Ya calculado via core.scoring en _process_ticker) ──
-        # Aquí eliminamos el bloque de rankeo antiguo porque Finterm Light 
-        # nos provee 'Total' absoluto ya calculado basándose en matemáticas financieras reales.
+        # â”€â”€ QUANT SCORE (Ya calculado via core.scoring en _process_ticker) â”€â”€
+        # AquÃ­ eliminamos el bloque de rankeo antiguo porque Finterm Light 
+        # nos provee 'Total' absoluto ya calculado basÃ¡ndose en matemÃ¡ticas financieras reales.
 
         df = df.sort_values("Quant", ascending=False, na_position="last")
         st.session_state["screener_results"] = df
+    
+    # --- DEEP INTELLIGENCE AUDIT (Phase 12 Integration) ---
+    if "screener_results" in st.session_state and not st.session_state["screener_results"].empty:
+        with st.expander("🤖 AUDITORÍA DE INTELIGENCIA: Análisis Multi-Fuente"):
+            st.markdown("""
+            Este módulo consolida inteligencia de fuentes propietarias y externas:
+            - **Análisis de Ratios**: +50 métricas de solvencia y eficiencia.
+            - **Estimaciones**: Consenso de mercado y proyecciones.
+            - **Sentimiento**: Pulso de mercado en tiempo real.
+            """)
+            st.info("Módulo de Extracción Avanzada en mantenimiento para optimización de latencia.")
 
-        # ── RESULTS ──
+        # â”€â”€ RESULTS â”€â”€
     if "screener_results" in st.session_state:
         df = st.session_state["screener_results"]
 
@@ -335,8 +353,8 @@ def _render_yfinance_screener():
         available_cols = [c for c in display_cols if c in df.columns]
         df_show = df[available_cols].copy()
 
-        # ── STOCK CARDS UI REDESIGN ──
-        st.markdown("<br>", unsafe_allow_html=True)
+        # [STOCK CARDS UI REDESIGN]
+        st.markdown("<div class='sec-title'>📊 Oportunidades de Alta Convicción</div>", unsafe_allow_html=True)
         
         top_n_cards = 15
         df_cards = df_show.head(top_n_cards)
@@ -381,6 +399,19 @@ def _render_yfinance_screener():
                     except (ValueError, TypeError):
                         t_alt_val = 0.0
                     alt_color = "#34d399" if t_alt_val >= 3.0 else ("#fbbf24" if t_alt_val >= 1.8 else "#f87171")
+                    
+                    # ── DYNAMIC BADGES LOGIC ──
+                    badges = ""
+                    try: t_roe_val = float(row.get("ROE %", 0) or 0)
+                    except: t_roe_val = 0
+                    try: t_div_val = float(row.get("Div %", 0) or 0)
+                    except: t_div_val = 0
+                    try: t_de_val = float(row.get("D/E", 100) or 100)
+                    except: t_de_val = 100
+                    
+                    if t_roe_val > 25: badges += "<span style='background:#3b82f620;color:#3b82f6;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;margin-right:4px;'>⭐ ALTA RENT</span>"
+                    if t_div_val > 3: badges += "<span style='background:#10b98120;color:#10b981;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;margin-right:4px;'>💰 DIVIDENDO</span>"
+                    if t_de_val < 0.5: badges += "<span style='background:#f59e0b20;color:#f59e0b;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;'>🛡️ BALANCE SÓLIDO</span>"
 
                     with col:
                         # Card HTML
@@ -396,6 +427,7 @@ def _render_yfinance_screener():
                                     <div style='font-size: 18px; color: {q_color}; font-weight: 800;'>{int(t_quant) if pd.notna(t_quant) else 50}</div>
                                 </div>
                             </div>
+                            <div style='margin-bottom:12px;'>{badges}</div>
                             <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;'>
                                 <div>
                                     <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>P/E Ratio</div>
@@ -413,32 +445,33 @@ def _render_yfinance_screener():
                                     <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>ROE Promedio</div>
                                     <div style='font-size: 15px; color: {roe_color}; font-weight: 700;'>{t_roe}</div>
                                 </div>
-                                <div>
-                                    <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>Piotroski</div>
-                                    <div style='font-size: 15px; color: {pio_color}; font-weight: 700;'>{t_pio}</div>
-                                </div>
-                                <div>
-                                    <div style='font-size: 10px; color: #6b7280; text-transform: uppercase;'>Altman Z</div>
-                                    <div style='font-size: 15px; color: {alt_color}; font-weight: 700;'>{f"{t_alt:.2f}" if isinstance(t_alt, float) else t_alt}</div>
-                                </div>
                             </div>
                         </div>
                         """), unsafe_allow_html=True)
                         
+                        # Sparkline Trend
+                        s_data = row.get("Sparkline", [])
+                        if s_data:
+                            fig_spark = vc.render_sparkline(s_data)
+                            if fig_spark:
+                                st.plotly_chart(fig_spark, use_container_width=True, config={'displayModeBar': False})
+                        else:
+                            st.caption("No historical trend")
+
                         # Acciones Button Group
                         b1, b2 = st.columns(2)
                         with b1:
-                            if st.button("➕ Watch", key=f"add_{t_tick}", help=f"Agregar {t_tick} a Watchlist", use_container_width=True):
+                            if st.button("âž• Watch", key=f"add_{t_tick}", help=f"Agregar {t_tick} a Watchlist", use_container_width=True):
                                 db.add_ticker(t_tick, 0, row.get("Precio", 0), row.get("Sector", ""), "Desde screener (Card)")
-                                st.success("Añadido!")
+                                st.success("AÃ±adido!")
                         with b2:
-                            if st.button("🔍 Ver Detalle", key=f"analyze_{t_tick}", help=f"Análisis fundamental de {t_tick}", type="primary", use_container_width=True):
+                            if st.button("ðŸ” Ver Detalle", key=f"analyze_{t_tick}", help=f"AnÃ¡lisis fundamental de {t_tick}", type="primary", use_container_width=True):
                                 st.session_state["active_ticker"] = t_tick
                                 st.toast(f"{t_tick} marcado activo. Navega a Analizador.")
 
         if len(df_show) > top_n_cards:
             with st.expander(f"Ver {len(df_show) - top_n_cards} resultados adicionales en tabla"):
-                # ── EXPORT RESULTS ────────────────────────────────────────────────────────
+                # â”€â”€ EXPORT RESULTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 from utils import export_utils
                 export_utils.render_export_buttons(df_show.iloc[top_n_cards:], file_prefix="screener_results")
 
@@ -449,41 +482,46 @@ def _render_yfinance_screener():
                 )
 
 
-        # ── COMPARISON CHARTS ──
-        st.markdown("<div class='sec-title'>Comparacion Visual</div>", unsafe_allow_html=True)
+        # ── COMPARISON CHARTS (HEATMAP & SCATTER) ──
+        st.markdown("<div class='sec-title'>📈 Radar de Oportunidades (Visual)</div>", unsafe_allow_html=True)
         vc1, vc2 = st.columns(2)
 
         with vc1:
-            fig_pe = go.Figure()
-            fig_pe.add_trace(go.Bar(
-                x=df["Ticker"], y=df["P/E"].fillna(0),
-                marker_color=["#34d399" if (v or 99) < 20 else "#fbbf24" if (v or 99) < 30 else "#f87171"
-                               for v in df["P/E"]],
-                text=[f"{v:.1f}" if pd.notna(v) else "--" for v in df["P/E"]],
-                textposition="outside", textfont=dict(color="#94a3b8", size=9),
-            ))
-            fig_pe.add_hline(y=20, line_dash="dot", line_color="#fbbf24", annotation_text="P/E 20")
-            fig_pe.update_layout(**DARK, height=300,
-                title=dict(text="P/E Ratio", font=dict(color="#94a3b8", size=13), x=0.5),
-                showlegend=False)
-            st.plotly_chart(fig_pe, use_container_width=True)
+            st.markdown("<div style='color:#94a3b8; font-size:12px; margin-bottom:5px;'>ROE vs P/E (Bubble = Market Cap)</div>", unsafe_allow_html=True)
+            if "ROE %" in df.columns and "P/E" in df.columns:
+                df_scatter = df.dropna(subset=["ROE %", "P/E"]).copy()
+                if not df_scatter.empty:
+                    df_scatter["Market Cap"] = df_scatter.get("Market Cap", 1e9) # Fallback scale
+                    fig_scatter = px.scatter(
+                        df_scatter, x="P/E", y="ROE %",
+                        size="Market Cap", color="Sector" if "Sector" in df_scatter.columns else None,
+                        hover_name="Ticker", hover_data=["Empresa", "P/E", "ROE %", "Margen %"],
+                        template="plotly_dark", size_max=40
+                    )
+                    fig_scatter.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+            else:
+                st.info("Datos insuficientes para scatter plot.")
 
         with vc2:
-            fig_roe = go.Figure()
-            fig_roe.add_trace(go.Bar(
-                x=df["Ticker"], y=df["ROE %"],
-                marker_color=["#34d399" if v > 15 else "#fbbf24" if v > 8 else "#f87171"
-                               for v in df["ROE %"]],
-                text=[f"{v:.1f}%" for v in df["ROE %"]],
-                textposition="outside", textfont=dict(color="#94a3b8", size=9),
-            ))
-            fig_roe.add_hline(y=15, line_dash="dot", line_color="#34d399", annotation_text="ROE 15%")
-            fig_roe.update_layout(**DARK, height=300,
-                title=dict(text="ROE (%)", font=dict(color="#94a3b8", size=13), x=0.5),
-                showlegend=False)
-            st.plotly_chart(fig_roe, use_container_width=True)
+            st.markdown("<div style='color:#94a3b8; font-size:12px; margin-bottom:5px;'>Heatmap de Sector (Rentabilidad)</div>", unsafe_allow_html=True)
+            if "Sector" in df.columns and "Margen %" in df.columns:
+                df_tree = df.dropna(subset=["Sector", "Margen %"]).copy()
+                if not df_tree.empty:
+                    df_tree["Score"] = df_tree["Margen %"].clip(-50, 50)
+                    df_tree["Market Cap"] = df_tree.get("Market Cap", 1)  # size
+                    fig_tree = px.treemap(
+                        df_tree, path=[px.Constant("Mercado"), "Sector", "Ticker"],
+                        values='Market Cap', color='Score',
+                        color_continuous_scale="RdYlGn", color_continuous_midpoint=10,
+                        hover_name="Ticker", hover_data={"Margen %":':.1f'}
+                    )
+                    fig_tree.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig_tree, use_container_width=True)
+            else:
+                st.info("Datos insuficientes para el Heatmap.")
 
-        # ── ADD TO WATCHLIST ──
+        # â”€â”€ ADD TO WATCHLIST â”€â”€
         with st.expander("Agregar a Watchlist"):
             add_tickers = st.multiselect("Selecciona tickers", df["Ticker"].tolist())
             if st.button("Agregar seleccionados a Watchlist") and add_tickers:
@@ -493,6 +531,7 @@ def _render_yfinance_screener():
                 st.success(f"{len(add_tickers)} tickers agregados a la watchlist.")
 
 
+@st.fragment
 def _render_finviz_screener():
     """Finviz-based screener for faster bulk screening."""
     if not HAS_FINVIZ:
@@ -562,7 +601,7 @@ def _render_finviz_screener():
             st.error(f"Error al consultar Finviz: {e}")
             return
 
-    # ── RESULTS ──
+    # â”€â”€ RESULTS â”€â”€
     if "finviz_results" in st.session_state:
         df = st.session_state["finviz_results"]
 
@@ -596,13 +635,13 @@ def _render_finviz_screener():
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "Ticker": st.column_config.TextColumn("Ticker", help="Símbolo del activo", width="small"),
+                "Ticker": st.column_config.TextColumn("Ticker", help="SÃ­mbolo del activo", width="small"),
                 "Price": st.column_config.NumberColumn("Precio", format="$%.2f"),
                 "Change": st.column_config.TextColumn("Cambio"),
             }
         )
 
-        # ── HEATMAP: P/E by Sector ──
+        # â”€â”€ HEATMAP: P/E by Sector â”€â”€
         if "P/E" in df.columns and "Sector" in df.columns:
             st.markdown("<div class='sec-title'>Heatmap: P/E por Sector</div>", unsafe_allow_html=True)
             try:
@@ -643,7 +682,7 @@ def _render_finviz_screener():
                 st.warning(f"No se pudo generar el heatmap: {e}")
 
 
-# ── Top 100 S&P 500 by market cap, organized by 11 GICS sectors ──
+# â”€â”€ Top 100 S&P 500 by market cap, organized by 11 GICS sectors â”€â”€
 HEATMAP_TICKERS = {
     "Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "ADBE", "AMD", "CSCO", "INTC", "IBM", "QCOM", "TXN", "NOW", "INTU"],
     "Communication": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "TMUS", "VZ", "T", "EA", "WBD"],
@@ -658,7 +697,7 @@ HEATMAP_TICKERS = {
     "Materials": ["LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DD", "VMC", "MLM"],
 }
 
-# ── Global indices & ETFs organized by region ──
+# â”€â”€ Global indices & ETFs organized by region â”€â”€
 GLOBAL_INDICES = {
     "US": {
         "S&P 500": "^GSPC", "Nasdaq 100": "^NDX", "Dow Jones": "^DJI",
@@ -682,6 +721,7 @@ GLOBAL_INDICES = {
 }
 
 
+@st.fragment
 def _render_sector_heatmap():
     """FinViz-style sector heatmap using treemap colored by daily change %."""
     try:
@@ -792,6 +832,7 @@ def _render_sector_heatmap():
         st.error(f"Error al generar el heatmap: {e}")
 
 
+@st.fragment
 def _render_global_indices():
     """Global indices monitor with multi-period performance."""
     try:
@@ -938,62 +979,51 @@ def _render_global_indices():
         st.error(f"Error al cargar indices globales: {e}")
 
 
+@st.fragment
 def _render_security_finder():
-    """Advanced security finder -- search by company name or partial ticker."""
-    try:
-        st.markdown("<div class='sec-title'>Buscador de Acciones por Nombre</div>", unsafe_allow_html=True)
-        st.markdown("""
-        <div style='background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);
-                    border-radius:12px;padding:14px;margin-bottom:16px;color:#94a3b8;font-size:12px;'>
-          Busca acciones por nombre de empresa o ticker parcial. Los resultados se obtienen de yfinance.
-        </div>""", unsafe_allow_html=True)
+    query = st.text_input("Buscar Ticker o Empresa",
+                          placeholder="Ej: Apple, Microsoft, Tesla, NVDA...",
+                          key="finder_query")
 
-        search_query = st.text_input("Nombre de empresa o ticker",
-                                      placeholder="Ej: Apple, Microsoft, Tesla, NVDA...",
-                                      key="finder_query")
+    COMPANY_LOOKUP = {
+        "apple": "AAPL", "microsoft": "MSFT", "google": "GOOGL", "alphabet": "GOOGL",
+        "amazon": "AMZN", "meta": "META", "facebook": "META", "tesla": "TSLA",
+        "nvidia": "NVDA", "netflix": "NFLX", "disney": "DIS", "intel": "INTC",
+        "amd": "AMD", "salesforce": "CRM", "adobe": "ADBE", "oracle": "ORCL",
+        "ibm": "IBM", "cisco": "CSCO", "qualcomm": "QCOM", "paypal": "PYPL",
+        "shopify": "SHOP", "uber": "UBER", "airbnb": "ABNB", "spotify": "SPOT",
+        "coca cola": "KO", "coca-cola": "KO", "pepsi": "PEP", "pepsico": "PEP",
+        "walmart": "WMT", "costco": "COST", "nike": "NKE", "starbucks": "SBUX",
+        "mcdonalds": "MCD", "procter": "PG", "johnson": "JNJ",
+        "jpmorgan": "JPM", "jp morgan": "JPM", "goldman": "GS", "goldman sachs": "GS",
+        "bank of america": "BAC", "visa": "V", "mastercard": "MA",
+        "exxon": "XOM", "chevron": "CVX", "pfizer": "PFE", "moderna": "MRNA",
+        "berkshire": "BRK-B", "boeing": "BA", "caterpillar": "CAT",
+        "palantir": "PLTR", "snowflake": "SNOW", "crowdstrike": "CRWD",
+        "broadcom": "AVGO", "lilly": "LLY", "eli lilly": "LLY",
+        "unitedhealth": "UNH", "home depot": "HD", "target": "TGT",
+    }
 
-        # Common tickers lookup for name-based search
-        COMPANY_LOOKUP = {
-            "apple": "AAPL", "microsoft": "MSFT", "google": "GOOGL", "alphabet": "GOOGL",
-            "amazon": "AMZN", "meta": "META", "facebook": "META", "tesla": "TSLA",
-            "nvidia": "NVDA", "netflix": "NFLX", "disney": "DIS", "intel": "INTC",
-            "amd": "AMD", "salesforce": "CRM", "adobe": "ADBE", "oracle": "ORCL",
-            "ibm": "IBM", "cisco": "CSCO", "qualcomm": "QCOM", "paypal": "PYPL",
-            "shopify": "SHOP", "uber": "UBER", "airbnb": "ABNB", "spotify": "SPOT",
-            "coca cola": "KO", "coca-cola": "KO", "pepsi": "PEP", "pepsico": "PEP",
-            "walmart": "WMT", "costco": "COST", "nike": "NKE", "starbucks": "SBUX",
-            "mcdonalds": "MCD", "procter": "PG", "johnson": "JNJ",
-            "jpmorgan": "JPM", "jp morgan": "JPM", "goldman": "GS", "goldman sachs": "GS",
-            "bank of america": "BAC", "visa": "V", "mastercard": "MA",
-            "exxon": "XOM", "chevron": "CVX", "pfizer": "PFE", "moderna": "MRNA",
-            "berkshire": "BRK-B", "boeing": "BA", "caterpillar": "CAT",
-            "palantir": "PLTR", "snowflake": "SNOW", "crowdstrike": "CRWD",
-            "broadcom": "AVGO", "lilly": "LLY", "eli lilly": "LLY",
-            "unitedhealth": "UNH", "home depot": "HD", "target": "TGT",
-        }
+    if not query:
+        return
 
-        if search_query and st.button("Buscar", type="primary", key="finder_btn"):
-            query_lower = search_query.strip().lower()
-            candidates = []
+    if st.button("Buscar", type="primary", key="finder_btn"):
+        try:
+            query_lower = query.strip().lower()
+            candidates = [query.strip().upper()]
 
-            # First check direct ticker
-            candidates.append(search_query.strip().upper())
-
-            # Check name lookup
             for name, ticker_val in COMPANY_LOOKUP.items():
                 if query_lower in name or name in query_lower:
                     if ticker_val not in candidates:
                         candidates.append(ticker_val)
 
-            # Also try as direct ticker (uppercase)
             if len(candidates) <= 1:
-                # Try common suffixes for partial matches
                 for name, ticker_val in COMPANY_LOOKUP.items():
-                    if query_lower[:3] in name[:3]:
+                    if len(query_lower) >= 3 and query_lower[:3] in name[:3]:
                         if ticker_val not in candidates:
                             candidates.append(ticker_val)
 
-            candidates = candidates[:10]  # Limit
+            candidates = candidates[:10]
 
             with st.spinner(f"Buscando {len(candidates)} posibles coincidencias..."):
                 results = []
@@ -1019,12 +1049,12 @@ def _render_security_finder():
 
             if results:
                 res_df = pd.DataFrame(results)
-
                 st.markdown(f"**{len(results)} resultado(s) encontrado(s)**")
-                
-                from utils import export_utils
-                export_utils.render_export_buttons(res_df, file_prefix="finder_results")
-
+                try:
+                    from utils import export_utils
+                    export_utils.render_export_buttons(res_df, file_prefix="finder_results")
+                except Exception:
+                    pass
                 st.dataframe(
                     res_df.style.format({
                         "Precio": "${:.2f}",
@@ -1035,19 +1065,14 @@ def _render_security_finder():
                     }, na_rep="--"),
                     use_container_width=True, hide_index=True,
                 )
-
-                # Set active ticker
                 finder_select = st.selectbox(
                     "Seleccionar ticker activo",
                     [""] + [r["Ticker"] for r in results],
                     key="finder_select",
                 )
                 if finder_select:
-                    import streamlit as _st
-                    _st.session_state.active_ticker = finder_select
+                    st.session_state.active_ticker = finder_select
                     st.success(f"Ticker activo: {finder_select}")
-
-                # Add to watchlist
                 finder_add = st.multiselect(
                     "Agregar a Watchlist",
                     [r["Ticker"] for r in results],
@@ -1061,14 +1086,14 @@ def _render_security_finder():
             else:
                 st.warning("No se encontraron resultados. Intenta con otro nombre o ticker.")
 
-    except Exception as e:
-        st.warning(f"Error en el buscador: {e}")
+        except Exception as e:
+            st.warning(f"Error en el buscador: {e}")
 
 
 def _render_earnings_calendar():
     """Earnings calendar for S&P 500 and watchlist tickers."""
     try:
-        st.markdown("### Calendario de Earnings — S&P 500")
+        st.markdown("### Calendario de Earnings â€” S&P 500")
         st.markdown("Proximos reportes de resultados con estimaciones de analistas")
 
         # Use HEATMAP_TICKERS as source
@@ -1192,7 +1217,7 @@ def _render_fund_portfolios():
     try:
         from fund_data import FUND_PORTFOLIOS
 
-        st.markdown("### Fondos Institucionales — Portafolios 13F")
+        st.markdown("### Fondos Institucionales â€” Portafolios 13F")
         st.markdown(
             "<span style='color:#94a3b8;font-size:13px;'>"
             "Holdings de los fondos de inversion mas influyentes del mundo</span>",

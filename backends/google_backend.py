@@ -81,5 +81,5 @@ def call(model: str, prompt: str, system: str = "", max_tokens: int = 4096,
 
         return response.text.strip() if response.text else ""
     except Exception as e:
-        st.error(f"Gemini Error: {e}")
-        return ""
+        # Silently fail for multi-model chain to handle it
+        return f"Error: {e}"

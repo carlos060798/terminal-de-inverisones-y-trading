@@ -5,6 +5,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import json
 import database as db
+import ai_router
 
 
 def render():
@@ -204,6 +205,30 @@ def render():
             with c2:
                 st.markdown("#### 🔴 Caso Bear")
                 thesis_bear = st.text_area("¿Por qué bajaría?", value=bear_default, height=200, key="bear")
+
+            # AI Debate Action
+            if st.button("🚀 Generar Debate IA (Bull vs Bear)", use_container_width=True):
+                with st.spinner(f"Simulando debate institucional para {thesis_ticker}..."):
+                    try:
+                        # Construct context
+                        context = f"Ticker: {thesis_ticker}\n"
+                        if swot_hint:
+                            context += f"SWOT Hint: {json.dumps(swot_hint)}\n"
+                        
+                        debate_res = ai_router.generate_debate(thesis_ticker, context)
+                        if debate_res:
+                            st.session_state[f"bull_{thesis_ticker}"] = debate_res["bull"]
+                            st.session_state[f"bear_{thesis_ticker}"] = debate_res["bear"]
+                            st.session_state[f"verdict_{thesis_ticker}"] = debate_res["verdict"]
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error en debate IA: {e}")
+
+            # Check for session state values to override text areas if just debated
+            if f"bull_{thesis_ticker}" in st.session_state:
+                thesis_bull = st.session_state[f"bull_{thesis_ticker}"]
+            if f"bear_{thesis_ticker}" in st.session_state:
+                thesis_bear = st.session_state[f"bear_{thesis_ticker}"]
 
             verdict_options = ["Sin veredicto", "Comprar", "Mantener", "Evitar"]
             thesis_verdict = st.selectbox("Veredicto",

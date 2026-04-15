@@ -42,7 +42,7 @@ def get_recent_sec_filings(form_type="4", limit=10):
 def get_recent_congress_trades(limit=5):
     """
     Mock/Placeholder for aggregator of recent congress trades.
-    In production, this would scrape the latest from CapitolTrades.
+    In production, this would retrieve the latest from CapitolTrades.
     """
     return pd.DataFrame([
         {"date": "2026-04-09", "member": "Nancy Pelosi", "ticker": "NVDA", "type": "Purchase", "amount": "$500k - $1M"},

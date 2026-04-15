@@ -95,13 +95,15 @@ def render():
             
         submitted = st.form_submit_button("Crear Alerta", type="primary", use_container_width=True)
         if submitted and alert_ticker.strip():
-            db.add_alert(alert_ticker.strip().upper(), alert_dir, alert_threshold, alert_sess)
+            p_id = st.session_state.get("active_portfolio_id", 1)
+            db.add_alert(alert_ticker.strip().upper(), alert_dir, alert_threshold, alert_sess, portfolio_id=p_id)
             st.success("Alerta creada con éxito.")
             st.rerun()
 
     # ── CHECK LIVE ALERTS ─────────────────────────────────────────────────────
     st.markdown("<div class='sec-title'>Monitoreo en Vivo</div>", unsafe_allow_html=True)
-    alerts_df = db.get_alerts()
+    p_id = st.session_state.get("active_portfolio_id", 1)
+    alerts_df = db.get_alerts(portfolio_id=p_id)
     
     if not alerts_df.empty:
         if st.button("Verificar precios ahora", type="primary"):

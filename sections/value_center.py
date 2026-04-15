@@ -85,27 +85,88 @@ def _render_valuation_tab(ticker, info):
     avg_fv = fv_data.get("avg_fair_value", 0)
     upside = fv_data.get("upside_pct", 0)
     
-    c1.markdown(kpi("Precio Actual", f"${price:,.2f}", "", "blue"), unsafe_allow_html=True)
-    c2.markdown(kpi("Fair Value (Promedio)", f"${avg_fv:,.2f}", "", "purple"), unsafe_allow_html=True)
+    c1.markdown(kpi("Precio Actual", fmt(price), "", "blue"), unsafe_allow_html=True)
+    c2.markdown(kpi("Fair Value (Promedio)", fmt(avg_fv, prefix="$"), "", "purple"), unsafe_allow_html=True)
     
-    color = "green" if upside > 0 else "red"
-    c3.markdown(kpi("Upside Potencial", f"{upside:+.1f}%", "", color), unsafe_allow_html=True)
+    upside_val = upside if upside is not None else 0
+    color = "green" if upside_val > 0 else "red"
+    c3.markdown(kpi("Upside Potencial", fmt(upside, prefix="%"), "", color), unsafe_allow_html=True)
     
     signal = fv_data.get("signal", "N/A").upper()
     sig_col = fv_data.get("signal_color", "blue")
     c4.markdown(kpi("Veredicto", signal, "vs. Avg Fair Value", sig_col), unsafe_allow_html=True)
 
+    # ── Barbell Chart (Margin of Safety) ──
+    st.markdown("<br>", unsafe_allow_html=True)
+    _sec("📉 Visualización: Barbell de Margen de Seguridad")
+    
+    # Extract method values
+    pe_val = fv_data.get("pe_fair_value", 0)
+    dcf_val = fv_data.get("dcf_fair_value", 0)
+    peg_val = fv_data.get("peg_fair_value", 0)
+    low_v = min(filter(None, [pe_val, dcf_val, peg_val]), default=0)
+    high_v = max(filter(None, [pe_val, dcf_val, peg_val]), default=0)
+    
+    fig_barbell = go.Figure()
+    # Range line
+    fig_barbell.add_trace(go.Scatter(x=[low_v, high_v], y=[0, 0], mode="lines+markers", 
+                                     line=dict(color="#475569", width=6), marker=dict(size=12, color="#60a5fa"),
+                                     name="Rango Fair Value"))
+    # Current Price marker
+    price_color = "#10b981" if price < avg_fv else "#ef4444"
+    fig_barbell.add_trace(go.Scatter(x=[price], y=[0], mode="markers+text", 
+                                     text=[f"PRECIO: ${price:,.2f}"], textposition="top center",
+                                     marker=dict(color=price_color, size=20, symbol="diamond", line=dict(width=2, color="white")),
+                                     name="Precio Actual"))
+    
+    # Annotations for Low/High
+    fig_barbell.add_annotation(x=low_v, y=-0.05, text="MÍN (PESIMISTA)", showarrow=False, font=dict(size=10, color="#94a3b8"))
+    fig_barbell.add_annotation(x=high_v, y=-0.05, text="MÁX (OPTIMISTA)", showarrow=False, font=dict(size=10, color="#94a3b8"))
+    fig_barbell.add_annotation(x=avg_fv, y=0.08, text=f"PROMEDIO: ${avg_fv:,.2f}", showarrow=True, arrowhead=2, font=dict(color="#a78bfa"))
+
+    fig_barbell.update_layout(
+        **dark_layout(height=280, showlegend=False),
+        xaxis=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=False),
+        yaxis=dict(showgrid=False, showticklabels=False, range=[-0.15, 0.2])
+    )
+    st.plotly_chart(fig_barbell, use_container_width=True, config={'displayModeBar': False})
+
     # Methodology breakdown
+    st.markdown("---")
+    
+    # ── AI VALUATION INSIGHT ──
+    if st.button("🤖 Generar Análisis de Valor IA", use_container_width=True):
+        from services.text_service import analyze_stock
+        with st.spinner("Modelos de IA analizando fundamentos..."):
+            res_ai, provider = analyze_stock(
+                ticker, 
+                price=price, 
+                pe=fv_data.get("pe_method", {}).get("applied_pe", 0),
+                fair_value=avg_fv
+            )
+            if res_ai:
+                st.session_state["val_ai_cache"] = res_ai
+                st.session_state["val_ai_provider"] = provider
+                
+    if "val_ai_cache" in st.session_state:
+        prov_lbl = st.session_state.get("val_ai_provider", "IA")
+        st.markdown(f"""
+        <div style="background:rgba(139, 92, 246, 0.05); border:1px solid rgba(139, 92, 246, 0.2); padding:20px; border-radius:12px; margin-bottom:20px;">
+            <div style="color:#8b5cf6; font-size:12px; font-weight:800; text-transform:uppercase; margin-bottom:10px;">🤖 Quantum AI Valuator ({prov_lbl})</div>
+            <div style="color:#e2e8f0; font-size:13px; line-height:1.6;">{st.session_state["val_ai_cache"]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("---")
     m1, m2, m3 = st.columns(3)
     
-    # Method boxes
+    # Method boxes with improved design
     def _meth_box(title, val, details, color_hex):
         st.markdown(f"""
-        <div class='metric-card' style='border-top: 3px solid {color_hex};'>
-            <div class='mc-label'>{title}</div>
-            <div class='mc-value' style='color:{color_hex};'>${val:,.2f}</div>
-            <div class='mc-bench'>{details}</div>
+        <div style='background:rgba(30,41,59,0.3); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.05); border-top: 3px solid {color_hex}; border-radius:12px; padding:20px; margin-bottom:10px;'>
+            <div style='font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'>{title}</div>
+            <div style='font-size:24px; font-weight:800; color:{color_hex};'>{fmt(val)}</div>
+            <div style='font-size:11px; color:#94a3b8; margin-top:5px;'>{details}</div>
         </div>
         """, unsafe_allow_html=True)
 

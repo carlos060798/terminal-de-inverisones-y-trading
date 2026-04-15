@@ -6,22 +6,19 @@ from datetime import date
 # Provider registry
 # ---------------------------------------------------------------------------
 PROVIDERS = {
-    "openai-4o": {"backend": "openai", "model": "gpt-4o", "vision": True, "daily_limit": 500, "name": "GPT-4o"},
-    "openai-4o-mini": {"backend": "openai", "model": "gpt-4o-mini", "vision": True, "daily_limit": 2000, "name": "GPT-4o Mini"},
-    "gemini-flash": {"backend": "google", "model": "gemini-2.0-flash", "vision": True, "daily_limit": 1500, "name": "Gemini 2.0 Flash"},
-    "gemini-1.5": {"backend": "google", "model": "gemini-1.5-flash", "vision": True, "daily_limit": 1500, "name": "Gemini 1.5 Flash"},
-    "groq-vision": {"backend": "groq", "model": "llama-3.2-90b-vision-preview", "vision": True, "daily_limit": 14400, "name": "Llama 90B Vision"},
-    "groq-llama": {"backend": "groq", "model": "llama-3.3-70b-versatile", "vision": False, "daily_limit": 14400, "name": "Llama 3.3 70B"},
-    "deepseek-reasoner": {"backend": "deepseek", "model": "deepseek-reasoner", "vision": False, "daily_limit": 500, "name": "DeepSeek R1"},
-    "deepseek-chat": {"backend": "deepseek", "model": "deepseek-chat", "vision": False, "daily_limit": 500, "name": "DeepSeek V3"},
-    "or-qwen-vl": {"backend": "openrouter", "model": "qwen/qwen2.5-vl-72b-instruct:free", "vision": True, "daily_limit": 200, "name": "Qwen VL 72B"},
-    "or-deepseek": {"backend": "openrouter", "model": "deepseek/deepseek-r1:free", "vision": False, "daily_limit": 200, "name": "DeepSeek R1 Free"},
-    "or-qwen": {"backend": "openrouter", "model": "qwen/qwen-2.5-72b-instruct:free", "vision": False, "daily_limit": 200, "name": "Qwen 72B"},
-    "hf-llama-vision": {"backend": "hf", "model": "meta-llama/Llama-3.2-11B-Vision-Instruct", "vision": True, "daily_limit": 5000, "name": "Llama 11B Vision"},
-    "hf-qwen-vl": {"backend": "hf", "model": "Qwen/Qwen2.5-VL-7B-Instruct", "vision": True, "daily_limit": 5000, "name": "Qwen VL 7B"},
-    "hf-florence": {"backend": "hf", "model": "microsoft/Florence-2-large", "vision": True, "daily_limit": 5000, "name": "Florence-2"},
-    "hf-finbert": {"backend": "hf", "model": "ProsusAI/finbert", "vision": False, "daily_limit": 10000, "name": "FinBERT"},
-    "local-llama": {"backend": "local", "model": "llama3.2", "vision": False, "daily_limit": 999999, "name": "Local Llama (Ollama)"},
+    # ── PREMIUM (Pago) ────────────────────────────────────────────────────────
+    "openai-4o":         {"backend": "openai",      "model": "gpt-4o",                          "vision": True,  "daily_limit": 500,   "name": "GPT-4o"},
+    "openai-4o-mini":    {"backend": "openai",      "model": "gpt-4o-mini",                     "vision": True,  "daily_limit": 2000,  "name": "GPT-4o Mini"},
+    "deepseek-reasoner": {"backend": "deepseek",    "model": "deepseek-reasoner",               "vision": False, "daily_limit": 500,   "name": "DeepSeek R1"},
+    "deepseek-chat":     {"backend": "deepseek",    "model": "deepseek-chat",                   "vision": False, "daily_limit": 1000,  "name": "DeepSeek V3"},
+    # ── GRATUITOS ALTA CUOTA ──────────────────────────────────────────────────
+    "gemini-flash":      {"backend": "google",      "model": "gemini-2.5-flash-preview-04-17",  "vision": True,  "daily_limit": 1000,  "name": "Gemini 2.5 Flash"},
+    "groq-llama":        {"backend": "groq",        "model": "llama-3.3-70b-versatile",         "vision": False, "daily_limit": 1000,  "name": "Llama 3.3 70B"},
+    # ── GRATUITOS FALLBACK (OpenRouter) ──────────────────────────────────────
+    "or-qwen":           {"backend": "openrouter",  "model": "qwen/qwen-2.5-72b-instruct:free", "vision": False, "daily_limit": 200,   "name": "Qwen 72B Free"},
+    "or-deepseek":       {"backend": "openrouter",  "model": "deepseek/deepseek-r1:free",        "vision": False, "daily_limit": 200,   "name": "DeepSeek R1 Free"},
+    # ── ESPECIALIZADO FINANZAS ────────────────────────────────────────────────
+    "hf-finbert":        {"backend": "hf",          "model": "ProsusAI/finbert",                "vision": False, "daily_limit": 10000, "name": "FinBERT"},
 }
 
 # Map backend names to the API key each one requires

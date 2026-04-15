@@ -10,6 +10,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import streamlit as st
 from services import vision_service, text_service, sentiment_service, table_service
 from balancer import dashboard_data, PROVIDERS, is_available
 from agents.tools import TOOLS_METADATA
@@ -44,17 +45,17 @@ def _detect_mime(file_name):
 # ---------------------------------------------------------------------------
 # Backward-compatible public API
 # ---------------------------------------------------------------------------
-def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500, use_tools=True):
+@st.cache_data(ttl=1800, show_spinner="Consultando IA (Quantum Cache)...")
+def generate(prompt, system=SYSTEM_FINANCE, max_tokens=1500, use_tools=True, consensus=False):
     """Generate text via the text provider chain, with tools enabled by default.
-
-    Returns
-    -------
-    str | None
-        The generated text, or ``None`` if all providers failed.
+    Returns tuple[str | None, str].
     """
+    if consensus:
+        return text_service.generate_consensus(prompt, system, max_tokens)
+        
     tools = TOOLS_METADATA if use_tools else None
-    text, _pid = text_service.generate(prompt, system, max_tokens, tools=tools)
-    return text
+    return text_service.generate(prompt, system, max_tokens, tools=tools)
+
 
 
 def analyze_stock(ticker, price=None, pe=None, roe=None, margin=None,
@@ -64,11 +65,10 @@ def analyze_stock(ticker, price=None, pe=None, roe=None, margin=None,
 
     Returns str | None.
     """
-    text, _pid = text_service.analyze_stock(
+    return text_service.analyze_stock(
         ticker, price, pe, roe, margin, revenue_growth,
         debt_equity, fair_value, quality_score, sector,
     )
-    return text
 
 
 def analyze_chart_image(image_bytes, asset, patterns_text="", timeframe="",
@@ -78,10 +78,9 @@ def analyze_chart_image(image_bytes, asset, patterns_text="", timeframe="",
     Returns str (analysis text; never None).
     """
     mime = _detect_mime(file_name)
-    text, _pid = vision_service.analyze_chart(
+    return vision_service.analyze_chart(
         image_bytes, asset, timeframe, analysis_type, mime, patterns_text,
     )
-    return text
 
 
 def analyze_portfolio(positions):
@@ -89,8 +88,7 @@ def analyze_portfolio(positions):
 
     Returns str | None.
     """
-    text, _pid = text_service.analyze_portfolio(positions)
-    return text
+    return text_service.analyze_portfolio(positions)
 
 
 def analyze_trade(ticker, trade_type, entry, exit_price=None, pnl=None,
@@ -99,19 +97,17 @@ def analyze_trade(ticker, trade_type, entry, exit_price=None, pnl=None,
 
     Returns str | None.
     """
-    text, _pid = text_service.analyze_trade(
+    return text_service.analyze_trade(
         ticker, trade_type, entry, exit_price, pnl, strategy, user_query=user_query
     )
-    return text
 
 
 def generate_macro_insight(vix=None, yield_10y=None, sp500_ytd=None, user_query=None):
     """Generate a macro-economic insight.
-
-    Returns str | None.
+    Returns tuple[str | None, str].
     """
-    text, _pid = text_service.generate_macro_insight(vix, yield_10y, sp500_ytd, user_query=user_query)
-    return text
+    return text_service.generate_macro_insight(vix, yield_10y, sp500_ytd, user_query=user_query)
+
 
 
 def analyze_sentiment_finbert(headlines):
@@ -201,6 +197,12 @@ def route(task="text", prompt="", system="", max_tokens=1500,
             )
         finally:
             text_service.TEXT_CHAIN = original_chain
+
+    # Consensus task handling
+    if task == "consensus":
+        return text_service.generate_consensus(
+            prompt, system or SYSTEM_FINANCE, max_tokens
+        )
 
     # Default: text with tools
     return text_service.generate(

@@ -13,13 +13,71 @@ SEGUIMIENTO_MD = MD_PATH / "02_PLANIFICACION_SEGUIMIENTO.md"
 DOMINICAL_MD = MD_PATH / "03_INSTRUCTIVO_ANALISIS_DOMINICAL.md"
 
 def render():
+    # ── Premium CSS for Trading Plan ──
     st.markdown("""
-    <div class='top-header'>
-      <div>
-        <h1>Plan de Trading Profesional</h1>
-        <p>Price Action · Wyckoff · Smart Money Concepts · Swing Trading</p>
-      </div>
-    </div>""", unsafe_allow_html=True)
+    <style>
+    .tp-card {
+        background: rgba(30, 41, 59, 0.4);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 20px;
+    }
+    .check-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: rgba(16, 185, 129, 0.05);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        border: 1px solid rgba(16, 185, 129, 0.1);
+    }
+    .check-icon { color: #10b981; font-weight: 800; }
+    .check-text { font-size: 14px; color: #e2e8f0; }
+    
+    .matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+    .matrix-table th {
+        text-align: left;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        color: #94a3b8;
+        font-size: 11px;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .matrix-table td {
+        padding: 12px;
+        color: #f1f5f9;
+        font-size: 13px;
+        border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .semaforo {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .sem-opt {
+        flex: 1;
+        padding: 15px;
+        border-radius: 12px;
+        text-align: center;
+        font-weight: 700;
+        cursor: pointer;
+        opacity: 0.3;
+        transition: all 0.3s;
+    }
+    .sem-opt.active { opacity: 1; transform: scale(1.05); box-shadow: 0 0 15px rgba(0,0,0,0.5); }
+    .sem-verde { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+    .sem-amarillo { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
+    .sem-rojo { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; }
+    </style>
+    """, unsafe_allow_html=True)
 
     tab_est, tab_seg, tab_dom, tab_dia = st.tabs([
         "📊 Matriz de Estrategia", 
@@ -32,84 +90,98 @@ def render():
     # TAB 1: MATRIZ DE ESTRATEGIA
     # ──────────────────────────────────────────────────────────────────────────
     with tab_est:
-        st.markdown("### 🏹 Filosofía y Reglas Fundamentales")
+        st.markdown("<div class='sec-title'>🏹 Filosofía y Reglas Fundamentales</div>", unsafe_allow_html=True)
         
         c1, c2 = st.columns([2, 1])
         with c1:
-            with st.expander("🛡️ Reglas de Comportamiento (No negociables)", expanded=True):
-                st.markdown("""
-                - ✅ Solo opero setups con sesgo claro en 1W y 1D
-                - ✅ No persigo el precio. Si me faltó la entrada, busco el siguiente setup
-                - ✅ No opero noticias de alto impacto (FOMC, NFP, CPI) salvo que esté protegido
-                - ❌ Prohibido mover el SL en contra
-                - ❌ Prohibido añadir posición a un trade perdedor
-                """)
+            st.markdown("""
+            <div class='tp-card'>
+                <h4 style='margin-top:0; color:#ef4444;'>🛡️ Reglas de Comportamiento (No negociables)</h4>
+                <div class='check-item'><span class='check-icon'>✓</span><span class='check-text'>Solo opero setups con sesgo claro en 1W y 1D</span></div>
+                <div class='check-item'><span class='check-icon'>✓</span><span class='check-text'>No persigo el precio. Si me faltó la entrada, busco el siguiente setup</span></div>
+                <div class='check-item'><span class='check-icon'>✓</span><span class='check-text'>No opero noticias de alto impacto (FOMC, NFP, CPI) salvo protección</span></div>
+                <div class='check-item' style='background:rgba(239, 68, 68, 0.05); border-color:rgba(239,68,68,0.1);'><span class='check-icon' style='color:#ef4444;'>✕</span><span class='check-text'>Prohibido mover el SL en contra</span></div>
+                <div class='check-item' style='background:rgba(239, 68, 68, 0.05); border-color:rgba(239,68,68,0.1);'><span class='check-icon' style='color:#ef4444;'>✕</span><span class='check-text'>Prohibido añadir posición a un trade perdedor</span></div>
+            </div>
+            """, unsafe_allow_html=True)
             
-            with st.expander("📈 Reglas de Entrada y Confluencias"):
-                st.markdown("""
-                | Criterio | Requisito |
-                |---|---|
-                | **Sesgo 1W** | Definido (alcista / bajista / rango) |
-                | **Contexto 1D** | En zona de interés institucional (OB, FVG, POI) |
-                | **Estructura 4H** | BOS o ChoCH confirmado alineado con sesgo |
-                | **Confluencias** | Al menos 2 (Weekly + OB + FVG + Wyckoff + Sesión) |
-                """)
+            st.markdown("""
+            <div class='tp-card'>
+                <h4 style='margin-top:0; color:#60a5fa;'>📈 Reglas de Entrada (Confluencias SMC)</h4>
+                <table class='matrix-table'>
+                    <thead>
+                        <tr><th>Criterio</th><th>Requisito Dimensional</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><b>Sesgo 1W</b></td><td>Definido (alcista / bajista / rango)</td></tr>
+                        <tr><td><b>Contexto 1D</b></td><td>En zona de interés institucional (OB, FVG, POI)</td></tr>
+                        <tr><td><b>Estructura 4H</b></td><td>BOS o ChoCH confirmado alineado con sesgo</td></tr>
+                        <tr><td><b>Confluencias</b></td><td>Mínimo 2 (Weekly + OB + FVG + Wyckoff)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            """, unsafe_allow_html=True)
 
         with c2:
-            st.info("💡 **Estilo:** Swing Trading (2 a 10 días)")
-            st.info("🎯 **Edge:** Wyckoff + SMC en zonas institucionales")
-            st.info("⚖️ **Gestión:** Riesgo 1% | R:R ≥ 1:2")
-
-        st.markdown("---")
-        st.markdown("### 🔵 Universo de Activos")
-        
-        universo_data = [
-            {"Activo": "US30", "Tipo": "Índice USA", "Rol": "Sentimiento Riesgo", "Sesión": "NY"},
-            {"Activo": "EURUSD", "Tipo": "Forex Major", "Rol": "Riesgo/Apetito EUR", "Sesión": "Londres/NY"},
-            {"Activo": "GBPUSD", "Tipo": "Forex Major", "Rol": "Correlación EUR", "Sesión": "Londres/NY"},
-            {"Activo": "DXY", "Tipo": "Índice Dólar", "Rol": "Inverso a Majors", "Sesión": "NY"},
-            {"Activo": "US500", "Tipo": "Índice USA", "Rol": "Sentimiento Amplio", "Sesión": "NY"},
-            {"Activo": "USDJPY", "Tipo": "Forex Yen", "Rol": "Carry Trade / Risk-off", "Sesión": "Tokio/NY"},
-            {"Activo": "AUDUSD", "Tipo": "Forex Commodity", "Rol": "Riesgo Global / China", "Sesión": "Asia/Londres"},
-        ]
-        st.table(pd.DataFrame(universo_data))
+            st.markdown(f"""
+            <div class='tp-card' style='text-align:center;'>
+                <div style='font-size:10px; color:#94a3b8; text-transform:uppercase;'>Estilo de Inversión</div>
+                <div style='font-size:20px; font-weight:800; color:#60a5fa; margin:10px 0;'>Swing Trading</div>
+                <div style='font-size:12px; color:#e2e8f0;'>Frecuencia: 2 a 10 días</div>
+            </div>
+            <div class='tp-card' style='text-align:center;'>
+                <div style='font-size:10px; color:#94a3b8; text-transform:uppercase;'>Gestión de Riesgo</div>
+                <div style='font-size:20px; font-weight:800; color:#34d399; margin:10px 0;'>Max 1%</div>
+                <div style='font-size:12px; color:#e2e8f0;'>R:R Mínimo 1:2</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # TAB 2: PLAN DE SEGUIMIENTO
+    # TAB 2: PLAN DE SEGUIMIENTO (Semáforo Dinámico)
     # ──────────────────────────────────────────────────────────────────────────
     with tab_seg:
-        st.markdown("### 🟢 Semáforo de Condición de Mercado")
-        sem_col = st.radio("Estado Actual del Mercado", ["🟢 VERDE — Operar", "🟡 AMARILLO — Esperar", "🔴 ROJO — No operar"], horizontal=True)
+        st.markdown("<div class='sec-title'>🟢 Semáforo de Condición de Mercado</div>", unsafe_allow_html=True)
         
-        if "VERDE" in sem_col:
-            st.success("Tendencia clara 1W + 1D | Setup en zona | R:R ≥ 1:2")
-        elif "AMARILLO" in sem_col:
-            st.warning("Estructura mixta | Precio en medio de rango | Sin gatillo definido")
-        else:
-            st.error("Semana de FOMC/NFP | Volatilidad extrema | Correlaciones contradictorias")
+        sem_status = st.select_slider(
+            "Selecciona el estado del mercado para hoy",
+            options=["🔴 CRÍTICO", "🟡 NEUTRAL", "🟢 ÓPTIMO"],
+            value="🟢 ÓPTIMO"
+        )
+        
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            active = "active" if "ÓPTIMO" in sem_status else ""
+            st.markdown(f"<div class='sem-opt sem-verde {active}'>🟢 OPERAR<br><small>Zonas Claras</small></div>", unsafe_allow_html=True)
+        with col_s2:
+            active = "active" if "NEUTRAL" in sem_status else ""
+            st.markdown(f"<div class='sem-opt sem-amarillo {active}'>🟡 ESPERAR<br><small>Rango/Incertidumbre</small></div>", unsafe_allow_html=True)
+        with col_s3:
+            active = "active" if "CRÍTICO" in sem_status else ""
+            st.markdown(f"<div class='sem-opt sem-rojo {active}'>🔴 FUERA<br><small>Noticias/Caos</small></div>", unsafe_allow_html=True)
 
-        st.markdown("---")
-        
+        st.markdown("<br>", unsafe_allow_html=True)
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.markdown("#### ⏰ Mapa de Sesiones (Colombia UTC-5)")
             st.markdown("""
-            | Sesión | Horario | Importancia |
-            |---|---|---|
-            | **Londres** | 3:00am – 8:00am | EURUSD, GBPUSD, DE30 |
-            | **Solape (L-NY)** | 8:00am – 12:00pm | **MÁXIMA LIQUIDEZ** |
-            | **Nueva York** | 8:00am – 4:00pm | US30, US500, DXY |
-            | **Tokio** | 8:00pm – 12:00am | USDJPY, AUDUSD, NIKKEI |
-            """)
+            <div class='tp-card'>
+                <h4 style='margin-top:0;'>⏰ Ventana de Oro (UTC-5)</h4>
+                <table class='matrix-table'>
+                    <tr><td>Londres</td><td>3:00am – 8:00am</td></tr>
+                    <tr style='background:rgba(96,165,250,0.1);'><td style='font-weight:700;'>Solape L-NY</td><td>8:00am – 12:00pm</td></tr>
+                    <tr><td>Nueva York</td><td>8:00am – 4:00pm</td></tr>
+                </table>
+            </div>
+            """, unsafe_allow_html=True)
         
         with c2:
-            st.markdown("#### 🌅 Rutina Diaria (8:15am – 8:45am)")
             st.markdown("""
-            1. **Noticias:** ¿Hay alto impacto hoy? (Forex Factory)
-            2. **Prioridades:** ¿Tocaron zonas del domingo?
-            3. **Gatillo:** ¿Hay ChoCH/BOS en 4H/1H?
-            4. **Alertas:** Actualizar si el precio se movió.
-            """)
+            <div class='tp-card'>
+                <h4 style='margin-top:0;'>🌅 Rutina de Apertura</h4>
+                <div class='check-item'><span class='check-icon'>1</span><span class='check-text'>Noticias: Forex Factory (Evitar 🔴)</span></div>
+                <div class='check-item'><span class='check-icon'>2</span><span class='check-text'>Fronteras: ¿Precio en POI Dominical?</span></div>
+                <div class='check-item'><span class='check-icon'>3</span><span class='check-text'>Gatillo: ChoCH/BOS en M15/H1</span></div>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # TAB 3: ANÁLISIS DOMINICAL

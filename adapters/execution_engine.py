@@ -40,6 +40,24 @@ PRIORITY_THREADS: Dict[str, int] = {
     "batch":    1,
 }
 
+# Per-pool timeouts (Agresivos para fluidez)
+POOL_TIMEOUTS: Dict[str, float] = {
+    "realtime": 0.8,
+    "high":     3.0,
+    "medium":   8.0,
+    "low":      15.0,
+    "batch":    60.0,
+}
+
+# Per-pool queue limits (Backpressure)
+POOL_LIMITS: Dict[str, int] = {
+    "realtime": 20,
+    "high":     50,
+    "medium":   30,
+    "low":      20,
+    "batch":    10,
+}
+
 # Persistent result cache (SQLite-backed) shareable across processes/reruns
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache", "data_fabric")
 _DISK_CACHE = diskcache.Cache(_CACHE_DIR)
@@ -73,7 +91,8 @@ class ExecutionEngine:
 
     def __init__(self):
         from adapters.registry import autodiscover_providers
-        autodiscover_providers()
+        # Quick Start (Sprint 4): Only load critical providers initially
+        autodiscover_providers(priority_filter=["CORE"])
 
         self._pools: Dict[str, ThreadPoolExecutor] = {
             priority: ThreadPoolExecutor(
@@ -81,6 +100,11 @@ class ExecutionEngine:
                 thread_name_prefix=f"qrt_{priority}",
             )
             for priority, n in PRIORITY_THREADS.items()
+        }
+        # Semaphores to enforce bounded queue (Backpressure)
+        self._semaphores: Dict[str, threading.Semaphore] = {
+            priority: threading.Semaphore(POOL_LIMITS[priority])
+            for priority in PRIORITY_THREADS
         }
         self.circuit_breakers = CircuitBreakerRegistry(
             failure_threshold=3, reset_timeout=60.0
@@ -136,19 +160,29 @@ class ExecutionEngine:
         # 5. Wire circuit breaker into adapter
         adapter._circuit_breaker = self.circuit_breakers
 
-        # 6. Execute in appropriate priority pool
+        # 6. Execute in appropriate priority pool with Backpressure
         priority = cfg.priority if cfg else "medium"
         pool = self._pools.get(priority, self._pools["medium"])
+        sem = self._semaphores.get(priority)
+        
+        # Try to acquire slot in queue. If full, return stale cache immediately.
+        if sem and not sem.acquire(blocking=False):
+            logger.warning("[%s] pool %s queue full - serving stale", provider_id, priority)
+            return _cache_get(provider_id)
 
-        future = pool.submit(adapter.fetch, **kwargs)
         try:
-            result = future.result(timeout=15.0)
+            future = pool.submit(adapter.fetch, **kwargs)
+            # Use pool-specific timeout
+            t_out = POOL_TIMEOUTS.get(priority, 15.0)
+            result = future.result(timeout=t_out)
             if result.success:
                 _cache_set(result)
             return result
         except Exception as exc:
             logger.error("[%s] fetch_one exception: %s", provider_id, exc)
-            return None
+            return _cache_get(provider_id) # Last resort stale
+        finally:
+            if sem: sem.release()
 
     def fetch_many(
         self,
@@ -209,26 +243,45 @@ class ExecutionEngine:
                 continue
 
             pool = self._pools.get(priority, self._pools["medium"])
-            fut = pool.submit(adapter.fetch, **kwargs)
-            futures[fut] = pid
+            sem = self._semaphores.get(priority)
+            
+            # Backpressure: If queue full, fallback to stale cache immediately
+            if sem and not sem.acquire(blocking=False):
+                stale = _cache_get(pid)
+                if stale: results[pid] = stale
+                continue
 
-        # Collect results with timeout
+            try:
+                fut = pool.submit(adapter.fetch, **kwargs)
+                futures[fut] = (pid, priority)
+            except Exception:
+                if sem: sem.release()
+
+        # Collect results with pool-specific timeouts
         if futures:
-            done, pending = wait(list(futures.keys()), timeout=timeout)
-            for fut in done:
-                pid = futures[fut]
+            # We wait up to the maximum timeout of the involved pools
+            max_t = max([POOL_TIMEOUTS.get(p, 10.0) for _, p in futures.values()]) if futures else timeout
+            done, pending = wait(list(futures.keys()), timeout=max_t)
+            
+            for fut in list(futures.keys()):
+                pid, priority = futures[fut]
+                sem = self._semaphores.get(priority)
                 try:
-                    result = fut.result()
-                    results[pid] = result
-                    if result.success:
-                        _cache_set(result)
+                    if fut in done:
+                        result = fut.result()
+                        results[pid] = result
+                        if result.success:
+                            _cache_set(result)
+                    else:
+                        # Pending means timeout reached
+                        fut.cancel()
+                        logger.warning("[%s] fetch timed out after %.1fs", pid, max_t)
+                        stale = _cache_get(pid)
+                        if stale: results[pid] = stale
                 except Exception as exc:
                     logger.error("[%s] future error: %s", pid, exc)
-            # Cancel timed-out futures
-            for fut in pending:
-                fut.cancel()
-                pid = futures[fut]
-                logger.warning("[%s] fetch timed out after %.1fs", pid, timeout)
+                finally:
+                    if sem: sem.release()
 
         return results
 

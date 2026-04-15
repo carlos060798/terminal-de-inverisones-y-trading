@@ -6,7 +6,7 @@ from services import sentiment_service
 
 def sync_reddit_sentiment(ticker_list):
     """
-    Scrape Reddit (WallStreetBets, Stocks) for mentions of ticker_list
+    Fetch Reddit (WallStreetBets, Stocks) for mentions of ticker_list
     and save sentiment counts to DB.
     """
     try:

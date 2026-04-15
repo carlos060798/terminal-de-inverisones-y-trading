@@ -40,17 +40,89 @@ def init_db():
         c.execute("ALTER TABLE watchlist ADD COLUMN notes TEXT DEFAULT ''")
     except: pass
     try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN industry TEXT DEFAULT ''")
+    except: pass
+    try:
+        c.execute("ALTER TABLE watchlist ADD COLUMN target_weight REAL DEFAULT 0.0")
+    except: pass
+    try:
+        c.execute("ALTER TABLE price_alerts ADD COLUMN alert_type TEXT DEFAULT 'fixed'")
+    except: pass
+    try:
+        c.execute("ALTER TABLE price_alerts ADD COLUMN multiplier REAL DEFAULT 0.0")
+    except: pass
+    try:
         c.execute("ALTER TABLE watchlist ADD COLUMN stop_loss REAL")
     except: pass
     try:
         c.execute("ALTER TABLE watchlist ADD COLUMN take_profit REAL")
     except: pass
+    
+    # --- Performance Indexes (Step 3 - Phase 6) ---
+    for idx_cmd in [
+        "CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date)",
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist(ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_sentiment_tick ON market_sentiment(ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_sentiment_date ON market_sentiment(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_fx_instrument ON forex_trades(instrument)",
+        "CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON price_alerts(ticker)"
+    ]:
+        try:
+            c.execute(idx_cmd)
+        except: pass
     try:
         c.execute("ALTER TABLE watchlist ADD COLUMN list_name TEXT DEFAULT 'Principal'")
     except: pass
     try:
         c.execute("ALTER TABLE price_alerts ADD COLUMN session TEXT DEFAULT 'Any'")
     except: pass
+    
+    # --- Portfolio Migrations (Phase 8) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT UNIQUE NOT NULL,
+            description TEXT DEFAULT '',
+            type        TEXT DEFAULT 'Standard',
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    
+    # Create default portfolio if empty
+    c.execute("SELECT count(*) FROM portfolios")
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT INTO portfolios (name, description, type) VALUES ('Principal', 'Cartera principal de inversiones', 'Standard')")
+        conn.commit()
+        
+    # Add portfolio_id to all relevant tables
+    for table in ["watchlist", "trades", "forex_trades", "price_alerts"]:
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN portfolio_id INTEGER DEFAULT 1")
+        except: pass
+    
+    # --- Portfolio Migrations (Phase 8) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT UNIQUE NOT NULL,
+            description TEXT DEFAULT '',
+            type        TEXT DEFAULT 'Standard',
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    
+    # Create default portfolio if empty
+    c.execute("SELECT count(*) FROM portfolios")
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT INTO portfolios (name, description, type) VALUES ('Principal', 'Cartera principal de inversiones', 'Standard')")
+        conn.commit()
+        
+    # Add portfolio_id to all relevant tables
+    for table in ["watchlist", "trades", "forex_trades", "price_alerts"]:
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN portfolio_id INTEGER DEFAULT 1")
+        except: pass
 
     # --- Stock Analyses (advanced metrics) ---
     # This table is also in models.py but using raw SQL here to ensure schema matches the raw INSERTs
@@ -115,6 +187,28 @@ def init_db():
             updated_at          TEXT DEFAULT (datetime('now'))
         )
     """)
+
+    # --- Workspaces (Layouts - Step 2 - Phase 7) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT UNIQUE NOT NULL,
+            config_json TEXT NOT NULL,
+            is_active   INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    
+    # Pre-seed default workspaces if empty
+    c.execute("SELECT count(*) FROM workspaces")
+    if c.fetchone()[0] == 0:
+        import json
+        defaults = [
+            ("Standard", json.dumps({"performance":True,"risk":True,"precision":True,"psychology":True,"surveillance":True,"scanners":True})),
+            ("Risk Focus", json.dumps({"performance":False,"risk":True,"precision":False,"psychology":True,"surveillance":True,"scanners":False})),
+            ("Active Trader", json.dumps({"performance":True,"risk":False,"precision":True,"psychology":False,"surveillance":False,"scanners":True}))
+        ]
+        c.executemany("INSERT INTO workspaces (name, config_json) VALUES (?,?)", defaults)
 
     # --- Forex / Indices Trades ---
     c.execute("""
@@ -285,6 +379,109 @@ def init_db():
         )
     """)
 
+    # --- SEC ULTRA FINANCIALS (100+ concepts) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS company_financials_ultra (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT NOT NULL,
+            cik             TEXT,
+            concept         TEXT NOT NULL,
+            period_end      TEXT NOT NULL,
+            value           REAL,
+            unit            TEXT,
+            form            TEXT,
+            filed_date      TEXT,
+            accn            TEXT,
+            fy              INTEGER,
+            fp              TEXT,
+            recorded_at     TEXT DEFAULT (datetime('now')),
+            UNIQUE(ticker, concept, period_end, accn)
+        )
+    """)
+
+    # --- FRED MACRO HISTORY (80+ series) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS fred_macro_history (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            series_id       TEXT NOT NULL,
+            obs_date        TEXT NOT NULL,
+            value           REAL,
+            recorded_at     TEXT DEFAULT (datetime('now')),
+            UNIQUE(series_id, obs_date)
+        )
+    """)
+
+    # --- EXTERNAL INTELLIGENCE CACHE (FinViz, etc.) ---
+    try:
+        c.execute("ALTER TABLE web_scraped_cache RENAME TO external_intel_cache")
+    except: pass
+    try:
+        c.execute("ALTER TABLE external_intel_cache RENAME COLUMN scraped_at TO retrieved_at")
+    except: pass
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS external_intel_cache (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT NOT NULL,
+            source          TEXT NOT NULL,
+            payload_json    TEXT,
+            retrieved_at    TEXT DEFAULT (datetime('now')),
+            UNIQUE(ticker, source)
+        )
+    """)
+
+    # --- INSTITUTIONAL HOLDINGS (Whale Tracker 13F) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS institutional_holdings (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT NOT NULL,
+            manager_name    TEXT NOT NULL,
+            shares          REAL,
+            value           REAL,
+            report_date     TEXT,
+            change_pct      REAL,
+            recorded_at     TEXT DEFAULT (datetime('now')),
+            UNIQUE(ticker, manager_name, report_date)
+        )
+    """)
+
+    # --- Performance Indices ---
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stock_analyzer_ticker ON stock_analyses(ticker)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stock_analyzer_date ON stock_analyses(analyzed_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_market_sentiment_ticker ON market_sentiment(ticker)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_market_sentiment_date ON market_sentiment(created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_inv_notes_ticker ON investment_notes(ticker)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_forex_trades_date ON forex_trades(trade_date)")
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+
+
+# ── PORTFOLIO CRUD ──────────────────────────────────────────────────────────
+def get_portfolios() -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM portfolios ORDER BY id", conn)
+    conn.close()
+    return df
+
+def add_portfolio(name, desc="", p_type="Standard"):
+    conn = get_connection()
+    conn.execute("INSERT OR REPLACE INTO portfolios (name, description, type) VALUES (?, ?, ?)", (name, desc, p_type))
+    conn.commit()
+    conn.close()
+
+def delete_portfolio(p_id):
+    if p_id == 1: return # Protected Principal
+    conn = get_connection()
+    conn.execute("DELETE FROM portfolios WHERE id=?", (p_id,))
+    # Manual cascade deletions
+    conn.execute("DELETE FROM watchlist WHERE portfolio_id=?", (p_id,))
+    conn.execute("DELETE FROM trades WHERE portfolio_id=?", (p_id,))
+    conn.execute("DELETE FROM forex_trades WHERE portfolio_id=?", (p_id,))
+    conn.execute("DELETE FROM price_alerts WHERE portfolio_id=?", (p_id,))
     conn.commit()
     conn.close()
 
@@ -292,13 +489,31 @@ def init_db():
 # ── WATCHLIST ──────────────────────────────────────────────────────────────────
 def add_ticker(ticker: str, shares: float = 0, avg_cost: float = 0,
                sector: str = "", notes: str = "", list_name: str = "Principal",
-               stop_loss: float = None, take_profit: float = None):
+               stop_loss: float = None, take_profit: float = None, industry: str = "",
+               target_weight: float = 0.0, portfolio_id: int = 1):
     conn = get_connection()
     try:
-        conn.execute(
-            "INSERT OR IGNORE INTO watchlist (ticker, shares, avg_cost, sector, notes, list_name, stop_loss, take_profit) VALUES (?,?,?,?,?,?,?,?)",
-            (ticker.upper(), shares, avg_cost, sector, notes, list_name, stop_loss, take_profit)
-        )
+        if (not sector or not industry) and yf:
+            try:
+                info = yf.Ticker(ticker).info
+                sector = sector or info.get("sector", "N/A")
+                industry = industry or info.get("industry", "N/A")
+            except: pass
+
+        # Check if already exists in THIS portfolio
+        c = conn.cursor()
+        c.execute("SELECT id FROM watchlist WHERE ticker = ? AND portfolio_id = ?", (ticker.upper(), portfolio_id))
+        row = c.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE watchlist SET shares=?, avg_cost=?, sector=?, industry=?, notes=?, list_name=?, stop_loss=?, take_profit=?, target_weight=? WHERE id=?",
+                (shares, avg_cost, sector, industry, notes, list_name, stop_loss, take_profit, target_weight, row[0])
+            )
+        else:
+            conn.execute(
+                "INSERT INTO watchlist (ticker, shares, avg_cost, sector, industry, notes, list_name, stop_loss, take_profit, target_weight, portfolio_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (ticker.upper(), shares, avg_cost, sector, industry, notes, list_name, stop_loss, take_profit, target_weight, portfolio_id)
+            )
         conn.commit()
     finally:
         conn.close()
@@ -311,18 +526,18 @@ def remove_ticker(ticker: str):
     conn.close()
 
 
-def get_watchlist() -> pd.DataFrame:
+def get_watchlist(portfolio_id: int = 1) -> pd.DataFrame:
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", conn)
+    df = pd.read_sql("SELECT * FROM watchlist WHERE portfolio_id = ? ORDER BY added_at DESC", conn, params=(portfolio_id,))
     conn.close()
     return df
 
 
-def get_watchlist_lists():
-    """Get all distinct list names from watchlist"""
+def get_watchlist_lists(portfolio_id: int = 1):
+    """Get all distinct list names from watchlist for a specific portfolio"""
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT DISTINCT list_name FROM watchlist ORDER BY list_name")
+    c.execute("SELECT DISTINCT list_name FROM watchlist WHERE portfolio_id = ? ORDER BY list_name", (portfolio_id,))
     lists = [row[0] for row in c.fetchall() if row[0]]
     conn.close()
     if not lists:
@@ -339,23 +554,25 @@ def move_ticker_to_list(ticker, list_name):
     conn.close()
 
 
-def get_watchlist_by_list(list_name=None):
-    """Get watchlist filtered by list name"""
+def get_watchlist_by_list(list_name=None, portfolio_id=1):
+    """Get watchlist filtered by list name and portfolio_id"""
     conn = get_connection()
     if list_name and list_name != 'Todas':
-        df = pd.read_sql("SELECT * FROM watchlist WHERE list_name = ? ORDER BY added_at DESC", conn, params=(list_name,))
+        df = pd.read_sql("SELECT * FROM watchlist WHERE list_name = ? AND portfolio_id = ? ORDER BY added_at DESC", 
+                         conn, params=(list_name, portfolio_id))
     else:
-        df = pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", conn)
+        df = pd.read_sql("SELECT * FROM watchlist WHERE portfolio_id = ? ORDER BY added_at DESC", 
+                         conn, params=(portfolio_id,))
     conn.close()
     return df
 
 
 def update_ticker(ticker: str, shares: float, avg_cost: float,
-                  sector: str, notes: str):
+                  sector: str, notes: str, industry: str = "", portfolio_id: int = 1):
     conn = get_connection()
     conn.execute(
-        "UPDATE watchlist SET shares=?, avg_cost=?, sector=?, notes=? WHERE ticker=?",
-        (shares, avg_cost, sector, notes, ticker.upper())
+        "UPDATE watchlist SET shares=?, avg_cost=?, sector=?, industry=?, notes=? WHERE ticker=? AND portfolio_id=?",
+        (shares, avg_cost, sector, industry, notes, ticker.upper(), portfolio_id)
     )
     conn.commit()
     conn.close()
@@ -369,7 +586,8 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
               stop_loss=None, take_profit=None,
               risk_pct=0.0, phase="", event="",
               abs_detected=0, sot_detected=0, dxy_aligned=0,
-              vix_context=0.0, score_fortaleza=0):
+              vix_context=0.0, score_fortaleza=0,
+              portfolio_id: int = 1):
     pnl, pnl_pct = None, None
     if exit_price and exit_price > 0:
         if trade_type == "Compra":
@@ -385,21 +603,21 @@ def add_trade(trade_date, ticker, trade_type, entry_price,
            (trade_date, ticker, trade_type, entry_price, exit_price,
             shares, pnl, pnl_pct, strategy, psych_notes, lecciones, errores,
             setup_type, error_type, trade_rating, stop_loss, take_profit,
-            risk_pct, phase, event, abs_detected, sot_detected, dxy_aligned, vix_context, score_fortaleza)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            risk_pct, phase, event, abs_detected, sot_detected, dxy_aligned, vix_context, score_fortaleza, portfolio_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), ticker.upper(), trade_type, entry_price,
          exit_price, shares, pnl, pnl_pct, strategy, psych_notes,
          lecciones, errores, setup_type, error_type, trade_rating,
          stop_loss, take_profit, risk_pct, phase, event, abs_detected,
-         sot_detected, dxy_aligned, vix_context, score_fortaleza)
+         sot_detected, dxy_aligned, vix_context, score_fortaleza, portfolio_id)
     )
     conn.commit()
     conn.close()
 
 
-def get_trades() -> pd.DataFrame:
+def get_trades(portfolio_id: int = 1) -> pd.DataFrame:
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM trades ORDER BY trade_date DESC", conn)
+    df = pd.read_sql("SELECT * FROM trades WHERE portfolio_id = ? ORDER BY trade_date DESC", conn, params=(portfolio_id,))
     conn.close()
     return df
 
@@ -572,7 +790,8 @@ def add_forex_trade(trade_date, instrument, instrument_type, direction,
                     pips, pnl, commission, swap, strategy, timeframe, session, notes,
                     setup_type="", trade_rating=3,
                     phase="", event="", abs_detected=0, sot_detected=0,
-                    dxy_aligned=0, vix_context=0.0, risk_pct=0.0, score_fortaleza=0):
+                    dxy_aligned=0, vix_context=0.0, risk_pct=0.0, score_fortaleza=0,
+                    portfolio_id: int = 1):
     conn = get_connection()
     conn.execute(
         """INSERT INTO forex_trades
@@ -580,48 +799,60 @@ def add_forex_trade(trade_date, instrument, instrument_type, direction,
             entry_price, exit_price, stop_loss, take_profit, pips, pnl,
             commission, swap, strategy, timeframe, session, notes,
             setup_type, trade_rating, phase, event, abs_detected,
-            sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza, portfolio_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(trade_date), instrument.upper(), instrument_type, direction,
          lots, entry_price, exit_price, stop_loss, take_profit,
          pips, pnl, commission, swap, strategy, timeframe, session, notes,
          setup_type, trade_rating, phase, event, abs_detected,
-         sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza)
+         sot_detected, dxy_aligned, vix_context, risk_pct, score_fortaleza, portfolio_id)
     )
     conn.commit()
     conn.close()
 
 
-def get_forex_trades() -> pd.DataFrame:
+def get_forex_trades(portfolio_id: int = 1) -> pd.DataFrame:
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM forex_trades ORDER BY trade_date DESC", conn)
+    df = pd.read_sql("SELECT * FROM forex_trades WHERE portfolio_id = ? ORDER BY trade_date DESC", conn, params=(portfolio_id,))
     conn.close()
     return df
 
 
-def delete_forex_trade(trade_id: int):
+def save_workspace(name: str, config_dict: dict):
+    import json
     conn = get_connection()
-    conn.execute("DELETE FROM forex_trades WHERE id=?", (trade_id,))
+    config_json = json.dumps(config_dict)
+    conn.execute("INSERT OR REPLACE INTO workspaces (name, config_json) VALUES (?, ?)", (name, config_json))
+    conn.commit()
+    conn.close()
+
+def get_workspaces() -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM workspaces", conn)
+    conn.close()
+    return df
+
+def delete_workspace(name: str):
+    conn = get_connection()
+    conn.execute("DELETE FROM workspaces WHERE name=?", (name,))
     conn.commit()
     conn.close()
 
 
 # ── PRICE ALERTS ──────────────────────────────────────────────────────────────
-def add_alert(ticker: str, direction: str, threshold: float, session: str = "Any"):
+def add_alert(ticker: str, direction: str, threshold: float, session: str = "Any", alert_type: str = "fixed", multiplier: float = 0.0, portfolio_id: int = 1):
     conn = get_connection()
-    try:
-        conn.execute(
-            "INSERT INTO price_alerts (ticker, direction, threshold, session) VALUES (?,?,?,?)",
-            (ticker.upper(), direction, threshold, session)
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute(
+        "INSERT INTO price_alerts (ticker, direction, threshold, session, alert_type, multiplier, portfolio_id) VALUES (?,?,?,?,?,?,?)",
+        (ticker.upper(), direction, threshold, session, alert_type, multiplier, portfolio_id)
+    )
+    conn.commit()
+    conn.close()
 
 
-def get_alerts() -> pd.DataFrame:
+def get_alerts(portfolio_id: int = 1) -> pd.DataFrame:
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM price_alerts ORDER BY created_at DESC", conn)
+    df = pd.read_sql("SELECT * FROM price_alerts WHERE portfolio_id = ? ORDER BY created_at DESC", conn, params=(portfolio_id,))
     conn.close()
     return df
 
@@ -660,6 +891,20 @@ def get_latest_sentiment(ticker: str = None, limit: int = 20) -> pd.DataFrame:
     else:
         query = "SELECT * FROM market_sentiment ORDER BY created_at DESC LIMIT ?"
         df = pd.read_sql(query, conn, params=(limit,))
+    conn.close()
+    return df
+
+def get_sentiment_trend(days: int = 7) -> pd.DataFrame:
+    """Returns daily average sentiment score for horizontal trend analysis."""
+    conn = get_connection()
+    query = """
+        SELECT date(created_at) as date, AVG(score) as avg_score, COUNT(*) as count
+        FROM market_sentiment
+        WHERE created_at >= date('now', ?)
+        GROUP BY date(created_at)
+        ORDER BY date ASC
+    """
+    df = pd.read_sql(query, conn, params=(f'-{days} days',))
     conn.close()
     return df
 
@@ -717,3 +962,84 @@ def get_analyst_recommendation(ticker: str):
     row = conn.execute("SELECT * FROM analyst_recommendations WHERE ticker = ?", (ticker.upper(),)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+# ── SEC ULTRA FINANCIALS ──────────────────────────────────────────────────────
+def save_ultra_financials(ticker: str, cik: str, data_list: list):
+    conn = get_connection()
+    try:
+        conn.executemany("""
+            INSERT OR REPLACE INTO company_financials_ultra 
+            (ticker, cik, concept, period_end, value, unit, form, filed_date, accn, fy, fp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [(ticker.upper(), cik, d["concept"], d["end"], d["val"], d["unit"], 
+               d.get("form"), d.get("filed"), d.get("accn"), d.get("fy"), d.get("fp")) 
+              for d in data_list])
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_ultra_financials(ticker: str) -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM company_financials_ultra WHERE ticker = ? ORDER BY period_end DESC", 
+                     conn, params=(ticker.upper(),))
+    conn.close()
+    return df
+
+# ── FRED MACRO HISTORY ────────────────────────────────────────────────────────
+def save_macro_history(series_id: str, observations: list):
+    conn = get_connection()
+    try:
+        conn.executemany("""
+            INSERT OR REPLACE INTO fred_macro_history (series_id, obs_date, value)
+            VALUES (?, ?, ?)
+        """, [(series_id, obs["date"], obs["value"]) for obs in observations])
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_macro_history(series_id: str) -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM fred_macro_history WHERE series_id = ? ORDER BY obs_date DESC", 
+                     conn, params=(series_id,))
+    conn.close()
+    return df
+
+# ── EXTERNAL INTELLIGENCE CACHE ───────────────────────────────────────────────────
+def save_external_intelligence(ticker: str, source: str, payload: dict):
+    from json import dumps
+    conn = get_connection()
+    conn.execute("""
+        INSERT OR REPLACE INTO external_intel_cache (ticker, source, payload_json)
+        VALUES (?, ?, ?)
+    """, (ticker.upper(), source, dumps(payload)))
+    conn.commit()
+    conn.close()
+
+def get_external_intelligence(ticker: str, source: str) -> dict:
+    from json import loads
+    conn = get_connection()
+    row = conn.execute("SELECT payload_json FROM external_intel_cache WHERE ticker = ? AND source = ?", 
+                       (ticker.upper(), source)).fetchone()
+    conn.close()
+    return loads(row[0]) if row else None
+
+# ── INSTITUTIONAL HOLDINGS ────────────────────────────────────────────────────
+def save_institutional_holdings(ticker: str, holdings: list):
+    conn = get_connection()
+    try:
+        conn.executemany("""
+            INSERT OR REPLACE INTO institutional_holdings 
+            (ticker, manager_name, shares, value, report_date, change_pct)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [(ticker.upper(), h["manager"], h["shares"], h.get("value"), 
+               h.get("date"), h.get("change")) for h in holdings])
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_institutional_holdings(ticker: str) -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM institutional_holdings WHERE ticker = ? ORDER BY value DESC", 
+                     conn, params=(ticker.upper(),))
+    conn.close()
+    return df

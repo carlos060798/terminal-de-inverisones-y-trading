@@ -1,0 +1,32 @@
+TypeError: Cannot join tz-naive with tz-aware DatetimeIndex
+
+File "D:\dasboard\app.py", line 243, in <module>
+    _mod.render()
+    ~~~~~~~~~~~^^
+File "D:\dasboard\sections\macro_context.py", line 317, in render
+    c = mse.get_ticker_macro_correlation(ticker, sid)
+File "D:\dasboard\services\macro_stress_test.py", line 29, in get_ticker_macro_correlation
+    combined = pd.concat([tk_hist, fred_hist["value"]], axis=1).dropna()
+               ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\reshape\concat.py", line 395, in concat
+    return op.get_result()
+           ~~~~~~~~~~~~~^^
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\reshape\concat.py", line 659, in get_result
+    index, columns = self.new_axes
+                     ^^^^^^^^^^^^^
+File "pandas/_libs/properties.pyx", line 36, in pandas._libs.properties.CachedProperty.__get__
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\reshape\concat.py", line 703, in new_axes
+    self._get_concat_axis if i == self.bm_axis else self._get_comb_axis(i)
+                                                    ~~~~~~~~~~~~~~~~~~~^^^
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\reshape\concat.py", line 709, in _get_comb_axis
+    return get_objs_combined_axis(
+        self.objs,
+    ...<3 lines>...
+        copy=self.copy,
+    )
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\indexes\api.py", line 103, in get_objs_combined_axis
+    return _get_combined_index(obs_idxes, intersect=intersect, sort=sort, copy=copy)
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\indexes\api.py", line 156, in _get_combined_index
+    index = union_indexes(indexes, sort=False)
+File "C:\Users\usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\indexes\api.py", line 295, in union_indexes
+    raise TypeError("Cannot join tz-naive with tz-aware DatetimeIndex")

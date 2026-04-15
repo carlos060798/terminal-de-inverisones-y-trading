@@ -19,6 +19,8 @@ try:
         SYSTEM_SUMMARY,
         SYSTEM_PORTFOLIO,
     )
+    # Alias for backward compatibility
+    ask_gemini = generate
 except ImportError as e:
     # Fallback: if ai_router not available, provide minimal stubs
     import warnings
@@ -48,3 +50,5 @@ except ImportError as e:
         return []
     def route(task="text", prompt="", **kwargs):
         return ("Router no disponible", "none")
+    def ask_gemini(prompt, **kwargs):
+        return generate(prompt, **kwargs)

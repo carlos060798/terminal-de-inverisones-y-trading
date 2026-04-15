@@ -9,20 +9,19 @@ try:
 except ImportError:
     HAS_TRANSFORMERS = False
 
-_classifier = None
+import streamlit as st
 
+@st.cache_resource
 def get_finbert():
-    global _classifier
     if not HAS_TRANSFORMERS:
         return None
-    if _classifier is None:
-        # Intenta usar CUDA (GPU RTX 3050 Ti) si existe, de lo contrario CPU
-        device = 0 if torch.cuda.is_available() else -1
-        try:
-            _classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
-        except Exception:
-            _classifier = None
-    return _classifier
+    # Intenta usar CUDA (GPU RTX 3050 Ti) si existe, de lo contrario CPU
+    device = 0 if torch.cuda.is_available() else -1
+    try:
+        return pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
+    except Exception as e:
+        print(f"[SENTIMENT] Error loading FinBERT: {e}")
+        return None
 
 def analyze_sentiment_finbert(headlines: list) -> list:
     """

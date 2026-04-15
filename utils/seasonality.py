@@ -59,8 +59,10 @@ def compute_seasonality(ticker: str, years: int = 10) -> dict:
     monthly_df = pd.DataFrame(monthly_stats)
 
     # Best / worst months
-    best_month  = monthly_df.loc[monthly_df["Retorno Promedio (%)"].idxmax(), "Mes"]
-    worst_month = monthly_df.loc[monthly_df["Retorno Promedio (%)"].idxmin(), "Mes"]
+    col = monthly_df["Retorno Promedio (%)"].squeeze()
+    best_month  = monthly_df.loc[col.idxmax(), "Mes"]
+    worst_month = monthly_df.loc[col.idxmin(), "Mes"]
+
 
     # Day-of-week returns
     daily_returns = data.pct_change().dropna() * 100

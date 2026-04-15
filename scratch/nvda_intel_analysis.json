@@ -1,0 +1,19 @@
+{
+    "sec_stats": {
+        "total_gaap_concepts": 625,
+        "concepts_with_segments": []
+    },
+    "revenue_discrimination": [],
+    "valuable_unmapped_concepts": [
+        "DeferredTaxAssetsNet",
+        "OperatingLeaseRightOfUseAsset"
+    ],
+    "yf_exclusives": [
+        "forwardPE",
+        "targetMeanPrice",
+        "recommendationKey",
+        "shortPercentOfFloat",
+        "heldPercentInstitutions",
+        "impliedSharesOutstanding"
+    ]
+}

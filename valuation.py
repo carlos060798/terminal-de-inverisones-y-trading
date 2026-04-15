@@ -9,7 +9,9 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import scipy.stats as stats
 from cache_utils import get_ticker_info, get_financials
+import database as db
 
 # Sector median P/E ratios (approximate, based on historical averages)
 SECTOR_PE = {
@@ -522,6 +524,8 @@ def compute_health_scores(ticker: str) -> dict:
     """
     result = {"z_score": None, "z_label": None, "f_score": None, "f_label": None,
               "sloan_ratio": None, "sloan_label": None,
+              "m_score": {"score": 0, "interpretation": "N/A", "risk": "Low"},
+              "merton": {"pd": 0.01, "status": "SAFE"},
               "z_details": {}, "f_details": {}, "sloan_details": {}}
     info = get_ticker_info(ticker)
     fins = get_financials(ticker)
@@ -658,6 +662,26 @@ def compute_health_scores(ticker: str) -> dict:
             result["f_label"] = "MODERATE"
         else:
             result["f_label"] = "WEAK"
+
+        # ── BENEISH M-SCORE (Proxy) ──
+        # M = -4.84 + 0.92*DSRI + 0.528*GMI + 0.404*AQI + 0.892*SGI + 0.115*DEPI - 0.172*SGAI + 4.679*TATA - 0.327*LVGI
+        # Simplificación: Accruals (Sloan) y Crecimiento de Ventas (SGI)
+        sgi = (revenue / _get(financials, ["Total Revenue"])) if revenue else 1.0
+        m_val = -4.84 + (1.5 * (sloan or 0)) + (0.5 * sgi)
+        result["m_score"] = {
+            "score": round(m_val, 2),
+            "interpretation": "Probable Manipulador" if m_val > -1.78 else "No Manipulador",
+            "risk": "High" if m_val > -1.78 else "Low"
+        }
+
+        # ── MERTON DEFAULT PROB (Proxy) ──
+        # Basado en Deuda/Equity y Volatilidad (Proxy: 30%)
+        de = (total_debt or 0) / (market_cap or 1)
+        pd = min(0.99, max(0.01, de * 0.05)) # Proxy simple
+        result["merton"] = {
+            "pd": round(pd, 4),
+            "status": "ALERTA" if pd > 0.05 else "SAFE"
+        }
 
     except Exception:
         pass
@@ -1498,3 +1522,38 @@ def get_magic_formula_ranking(tickers: list) -> pd.DataFrame:
     df["Magic Score"] = df["Rank EY"] + df["Rank ROC"]
     
     return df.sort_values("Magic Score")
+def get_ultra_health_report(ticker: str) -> dict:
+    """
+    Consolidates multiple health and quality checks into one massive report.
+    Used by Stock Analyzer for high-density financial integrity audits.
+    """
+    scores = compute_health_scores(ticker)   # Altman, Piotroski, Sloan
+    quality = compute_quality_score(ticker) # Buffett, Dorsey criteria
+    
+    # Determine overall health category
+    score_val = quality.get("score", 0)
+    category = "SPECULATIVE"
+    if score_val >= 80: category = "ELITE QUALITY"
+    elif score_val >= 60: category = "ROBUST"
+    elif score_val >= 40: category = "AVERAGE"
+    
+    return {
+        "z_score": scores.get("z_score"),
+        "z_label": scores.get("z_label"),
+        "f_score": scores.get("f_score"),
+        "f_label": scores.get("f_label"),
+        "sloan": {"ratio": scores.get("sloan_ratio"), "status": scores.get("sloan_label")},
+        "sloan_ratio": scores.get("sloan_ratio"),
+        "sloan_label": scores.get("sloan_label"),
+        "m_score": scores.get("m_score"),
+        "merton": scores.get("merton"),
+        "quality_score": score_val,
+        "quality_cat": category,
+        "passed_criteria": quality.get("passed"),
+        "total_criteria": quality.get("total"),
+        "details": quality.get("details"),
+        "raw": {
+            "scores": scores,
+            "quality": quality
+        }
+    }

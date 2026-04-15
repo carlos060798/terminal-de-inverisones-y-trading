@@ -24,15 +24,18 @@ def render():
     st.markdown("""
     <div class='top-header'>
       <div>
-        <h1>Backtesting Engine</h1>
-        <p>SMA Crossover · RSI · Bollinger · Mean Reversion · MACD · Walk-Forward · Optimización</p>
+        <h1>Backtest & Simulator</h1>
+        <p>SMA · RSI · Bollinger · MACD · Walk-Forward · What-If Simulator</p>
       </div>
     </div>""", unsafe_allow_html=True)
 
-    # Config
-    strategy_options = ["SMA Crossover", "RSI Oversold/Overbought"]
-    if HAS_STRATEGIES:
-        strategy_options += ["Bollinger Breakout", "Mean Reversion", "MACD Crossover"]
+    # config
+    tab_bt, tab_sim = st.tabs(["📊 Backtesting Histórico", "🎲 Simulador de Escenarios (What-if)"])
+    
+    with tab_bt:
+        strategy_options = ["SMA Crossover", "RSI Oversold/Overbought"]
+        if HAS_STRATEGIES:
+            strategy_options += ["Bollinger Breakout", "Mean Reversion", "MACD Crossover"]
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -96,73 +99,86 @@ def render():
             metrics = VectorizedEngine.extract_metrics(res, data)
             df = VectorizedEngine.generate_ui_dataframe(res, data)
 
+            # ── Premium UI Layout ──
+            st.markdown("""
+            <style>
+            .bt-container {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 15px;
+                margin-top: 20px;
+            }
+            .bt-card {
+                background: rgba(30, 41, 59, 0.4);
+                backdrop-filter: blur(8px);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                padding: 20px;
+                text-align: center;
+            }
+            .bt-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+            .bt-value { font-size: 24px; font-weight: 800; color: #ffffff; }
+            .bt-delta { font-size: 11px; margin-top: 5px; font-weight: 600; }
+            </style>
+            """, unsafe_allow_html=True)
+
             # KPIs
             mk1, mk2, mk3, mk4 = st.columns(4)
-            strat_color = "green" if metrics["total_return_strat"] >= 0 else "red"
-            bh_color = "green" if metrics["total_return_bh"] >= 0 else "red"
-            mk1.markdown(kpi("Retorno Estrategia", f"{metrics['total_return_strat']:+.1f}%", "", strat_color), unsafe_allow_html=True)
-            mk2.markdown(kpi("Retorno Buy & Hold", f"{metrics['total_return_bh']:+.1f}%", "", bh_color), unsafe_allow_html=True)
-            mk3.markdown(kpi("Sharpe Ratio", f"{metrics['sharpe']:.2f}", "", "blue"), unsafe_allow_html=True)
-            mk4.markdown(kpi("Max Drawdown", f"{metrics['max_drawdown']:.1f}%", "", "red"), unsafe_allow_html=True)
+            strat_val = metrics['total_return_strat']
+            bh_val = metrics['total_return_bh']
+            alpha = strat_val - bh_val
+            
+            with mk1:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Retorno Estrategia</div><div class='bt-value'>{strat_val:+.1f}%</div></div>", unsafe_allow_html=True)
+            with mk2:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Retorno Buy & Hold</div><div class='bt-value'>{bh_val:+.1f}%</div></div>", unsafe_allow_html=True)
+            with mk3:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Alpha Generado</div><div class='bt-value' style='color:{'#10b981' if alpha>=0 else '#ef4444'}'>{alpha:+.1f}%</div></div>", unsafe_allow_html=True)
+            with mk4:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Max Drawdown</div><div class='bt-value' style='color:#ef4444'>{metrics['max_drawdown']:.1f}%</div></div>", unsafe_allow_html=True)
 
-            # Additional KPIs
+            # Ratio Section
             st.markdown("<br>", unsafe_allow_html=True)
-            nk1, nk2, nk3 = st.columns(3)
-            nk1.markdown(kpi("Sortino Ratio", f"{metrics.get('sortino', 0):.2f}", "", "blue"), unsafe_allow_html=True)
-            nk2.markdown(kpi("Calmar Ratio", f"{metrics.get('calmar', 0):.2f}", "", "blue"), unsafe_allow_html=True)
-            nk3.markdown(kpi("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}", "", "green" if metrics.get('profit_factor', 0) > 1 else "red"), unsafe_allow_html=True)
-
-            # Alpha
-            alpha = metrics["total_return_strat"] - metrics["total_return_bh"]
-            alpha_color = "#34d399" if alpha >= 0 else "#f87171"
-            alpha_text = "SUPERÓ" if alpha >= 0 else "POR DEBAJO DE"
-            st.markdown(f"""
-            <div style='background:{alpha_color}20;border:1px solid {alpha_color};border-radius:12px;
-                        padding:16px;text-align:center;margin:12px 0;'>
-              <span style='color:{alpha_color};font-weight:700;font-size:18px;'>
-                Estrategia {alpha_text} Buy & Hold por {abs(alpha):.1f}% (Alpha: {alpha:+.1f}%)
-              </span>
-            </div>""", unsafe_allow_html=True)
+            rk1, rk2, rk3 = st.columns(3)
+            with rk1:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Sharpe Ratio</div><div class='bt-value' style='color:#60a5fa'>{metrics['sharpe']:.2f}</div></div>", unsafe_allow_html=True)
+            with rk2:
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Sortino Ratio</div><div class='bt-value' style='color:#60a5fa'>{metrics.get('sortino', 0):.2f}</div></div>", unsafe_allow_html=True)
+            with rk3:
+                pf = metrics.get('profit_factor', 0)
+                st.markdown(f"<div class='bt-card'><div class='bt-label'>Profit Factor</div><div class='bt-value' style='color:{'#10b981' if pf > 1 else '#f87171'}'>{pf:.2f}</div></div>", unsafe_allow_html=True)
 
             # Equity curve chart
+            st.markdown("<div class='sec-title'>Comparativa de Rendimiento Agregado</div>", unsafe_allow_html=True)
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
                                 row_heights=[0.7, 0.3],
-                                subplot_titles=["Equity Curve", "Drawdown"])
+                                subplot_titles=["Curvas de Equidad (Normalizadas)", "Intensidad de Drawdown"])
 
-            fig.add_trace(go.Scatter(x=df.index, y=df["Strategy_Equity"], name="Estrategia",
-                                     line=dict(color="#60a5fa", width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df["BuyHold_Equity"], name="Buy & Hold",
-                                     line=dict(color="#94a3b8", width=1, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["Strategy_Equity"], name="Quantum Strategy",
+                                     line=dict(color="#60a5fa", width=3), fill='tozeroy', fillcolor='rgba(96, 165, 250, 0.05)'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["BuyHold_Equity"], name="SPY Benchmark (Proxy)",
+                                     line=dict(color="#94a3b8", width=1.5, dash="dot")), row=1, col=1)
 
-            # Buy/sell markers
+            # Buy/sell markers with annotations
             buys = df[df["Position"] == 1]
             sells = df[df["Position"] == -1]
             if not buys.empty:
                 fig.add_trace(go.Scatter(x=buys.index, y=buys["Strategy_Equity"], mode="markers",
-                                         name="Compra", marker=dict(color="#34d399", size=8, symbol="triangle-up")), row=1, col=1)
+                                         name="Señal Compra", marker=dict(color="#10b981", size=10, symbol="triangle-up", line=dict(width=1, color="white"))), row=1, col=1)
             if not sells.empty:
                 fig.add_trace(go.Scatter(x=sells.index, y=sells["Strategy_Equity"], mode="markers",
-                                         name="Venta", marker=dict(color="#f87171", size=8, symbol="triangle-down")), row=1, col=1)
+                                         name="Señal Venta", marker=dict(color="#ef4444", size=10, symbol="triangle-down", line=dict(width=1, color="white"))), row=1, col=1)
 
             # Drawdown
             equity = df["Strategy_Equity"]
             running_max = equity.cummax()
             drawdown = (equity - running_max) / running_max * 100
             fig.add_trace(go.Scatter(x=df.index, y=drawdown, fill="tozeroy",
-                                     fillcolor="rgba(248,113,113,0.15)", line=dict(color="#f87171", width=1),
-                                     name="Drawdown"), row=2, col=1)
+                                     fillcolor="rgba(239, 68, 68, 0.15)", line=dict(color="#ef4444", width=1.5),
+                                     name="Drawdown %"), row=2, col=1)
 
-            fig.update_layout(
-                paper_bgcolor="#000000", plot_bgcolor="#0a0a0a",
-                font=dict(color="#94a3b8", size=12, family="Inter"),
-                height=600, showlegend=True,
-                legend=dict(bgcolor="#0a0a0a", bordercolor="#1a1a1a", font=dict(color="#94a3b8")),
-                margin=dict(l=16, r=16, t=24, b=16),
-            )
-            for ax in ["xaxis", "xaxis2", "yaxis", "yaxis2"]:
-                fig.update_layout(**{ax: dict(gridcolor="#1a1a1a", linecolor="#1a1a1a", zerolinecolor="#1a1a1a")})
-
-            st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(**dark_layout(height=650))
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
             # Trade summary
             st.markdown("<div class='sec-title'>Resumen de Operaciones</div>", unsafe_allow_html=True)
@@ -389,3 +405,120 @@ def render():
 
         except Exception as e:
             st.error(f"Error en backtesting: {e}")
+
+    # ══════════════════════════════════════════════════════════
+    # TAB 2: SCENARIO SIMULATOR
+    # ══════════════════════════════════════════════════════════
+    with tab_sim:
+        st.markdown("<div class='sec-title'>Validador de Tesis: Simulación Probabilística</div>", unsafe_allow_html=True)
+        
+        sc1, sc2, sc3 = st.columns([1.5, 1, 1])
+        s_ticker = sc1.text_input("Ticker para simulación", value=ticker if ticker else "AAPL").upper()
+        s_direction = sc2.selectbox("Dirección", ["Compra (Long)", "Venta (Short)"], key="sim_dir")
+        s_capital = sc3.number_input("Capital a Riesgo ($)", min_value=100.0, value=1000.0, step=100.0)
+
+        if s_ticker:
+            try:
+                with st.spinner("Analizando contexto de mercado..."):
+                    obj = yf.Ticker(s_ticker)
+                    hist_sim = obj.history(period="6mo")
+                    if hist_sim.empty:
+                        st.warning("No hay datos históricos para este ticker.")
+                        return
+                    
+                    # Technical context for probability
+                    last_price = hist_sim["Close"].iloc[-1]
+                    # ATR (14)
+                    high_low = hist_sim["High"] - hist_sim["Low"]
+                    high_close = (hist_sim["High"] - hist_sim["Close"].shift()).abs()
+                    low_close = (hist_sim["Low"] - hist_sim["Close"].shift()).abs()
+                    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                    atr = tr.rolling(14).mean().iloc[-1]
+                    
+                    # Trend context (SMA 50/200)
+                    sma50 = hist_sim["Close"].rolling(50).mean().iloc[-1]
+                    sma200 = hist_sim["Close"].rolling(200).mean().iloc[-1]
+                    trend_score = 1.0 if last_price > sma50 > sma200 else (0.5 if last_price > sma50 else 0.0)
+                    if "Short" in s_direction: trend_score = 1.0 - trend_score
+
+                st.markdown(f"**Precio Actual:** `${last_price:,.2f}` | **ATR(14):** `${atr:,.2f}`")
+                
+                sp1, sp2, sp3 = st.columns(3)
+                s_entry = sp1.number_input("Entrada ($)", value=float(last_price), step=0.01)
+                s_sl = sp2.number_input("Stop Loss ($)", value=float(s_entry - (atr * 1.5)) if "Compra" in s_direction else float(s_entry + (atr * 1.5)), step=0.01)
+                s_tp = sp3.number_input("Take Profit ($)", value=float(s_entry + (atr * 3)) if "Compra" in s_direction else float(s_entry - (atr * 3)), step=0.01)
+
+                # Risk/Reward
+                risk = abs(s_entry - s_sl)
+                reward = abs(s_tp - s_entry)
+                rr = reward / risk if risk > 0 else 0
+                
+                # Probability estimation
+                # Base 45% + Trend bonus (20%) + R/R penalty (if RR is too high, prob drops)
+                base_prob = 0.45 + (trend_score * 0.20)
+                rr_factor = max(0.2, 1.0 - (rr / 10)) # Penalizar R/R > 10
+                est_prob = base_prob * rr_factor * 100
+                
+                st.markdown("---")
+                sk1, sk2, sk3 = st.columns(3)
+                sk1.markdown(kpi("Risk / Reward", f"1 : {rr:.1f}", f"Risk: ${risk:,.2f}", "blue"), unsafe_allow_html=True)
+                sk2.markdown(kpi("Prob. Éxito (Est.)", f"{est_prob:.1f}%", f"Trend: {trend_score*100:.0f}%", "green" if est_prob > 50 else "orange"), unsafe_allow_html=True)
+                
+                # Expected Value
+                ev = (est_prob/100 * reward) - ((1 - est_prob/100) * risk)
+                sk3.markdown(kpi("Valor Esperado/Acción", f"${ev:,.2f}", "Prob x Rew - (1-Prob) x Risk", "green" if ev > 0 else "red"), unsafe_allow_html=True)
+
+                # --- PROFIT SIMULATOR ---
+                st.markdown("#### Simulación Neta (Comisiones/Slippage)")
+                si_cols = st.columns(2)
+                slippage = si_cols[0].slider("Slippage (%)", 0.0, 1.0, 0.1, step=0.05)
+                comm = si_cols[1].number_input("Comisión por Trade ($)", 0.0, 20.0, 1.5)
+                
+                shares = s_capital / risk if risk > 0 else 0
+                gross_loss = s_capital
+                gross_profit = shares * reward
+                
+                # Adjust for fees/slip
+                net_profit = gross_profit * (1 - slippage/100) - comm
+                net_loss = gross_loss * (1 + slippage/100) + comm
+                
+                st.markdown(f"""
+                <div style='background:rgba(255,255,255,0.03);padding:20px;border-radius:15px;border:1px solid rgba(255,255,255,0.1);'>
+                    <div style='display:flex;justify-content:space-between;margin-bottom:10px;'>
+                        <span style='color:#94a3b8;'>Acciones Sugeridas:</span>
+                        <span style='font-weight:700;color:#60a5fa;'>{shares:.2f} {s_ticker}</span>
+                    </div>
+                    <div style='display:flex;justify-content:space-between;margin-bottom:10px;'>
+                        <span style='color:#34d399;'>Beneficio Neto si Toca TP:</span>
+                        <span style='font-weight:700;color:#34d399;'>+${net_profit:,.2f}</span>
+                    </div>
+                    <div style='display:flex;justify-content:space-between;'>
+                        <span style='color:#f87171;'>Pérdida Neta si Toca SL:</span>
+                        <span style='font-weight:700;color:#f87171;'>-${net_loss:,.2f}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Visualization of Scenario
+                fig_sim = go.Figure()
+                fig_sim.add_trace(go.Scatter(x=[-1, 1], y=[s_entry, s_entry], name="Entrada", line=dict(color="#60a5fa", dash="dash", width=1.5)))
+                fig_sim.add_trace(go.Scatter(x=[-1.2, 1.2], y=[s_tp, s_tp], name="Take Profit", line=dict(color="#34d399", width=2), fill="tonexty", fillcolor="rgba(52,211,153,0.05)"))
+                fig_sim.add_trace(go.Scatter(x=[-1.2, 1.2], y=[s_sl, s_sl], name="Stop Loss", line=dict(color="#f87171", width=2)))
+                
+                # Simulated current price range
+                fig_sim.add_trace(go.Scatter(x=[0], y=[last_price], mode="markers+text", name="Precio Actual", 
+                                             text=[f"Actual: ${last_price:,.2f}"], textposition="top right",
+                                             marker=dict(color="#e2e8f0", size=10)))
+
+                fig_sim.update_layout(
+                    **dark_layout(
+                        height=350, showlegend=True, 
+                        title=dict(text=f"Proyección Visual de Escenario ({s_ticker})", font=dict(color="#94a3b8", size=13), x=0.5),
+                        xaxis=dict(showgrid=False, showticklabels=False),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                )
+                st.plotly_chart(fig_sim, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Error en simulación: {e}")

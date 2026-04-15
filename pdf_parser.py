@@ -324,7 +324,7 @@ def _parse_analyst(text):
 
     # Analyst Ratings
     rating_pattern = re.compile(
-        r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s*\d{2})\s+"
+        r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s*(?:\d{4}|\d{2}))\s+"
         r"(.+?)\s+(Buy|Hold|Sell|Strong Buy|Strong Sell|Outperform|Underperform|Neutral|Overweight|Underweight)\s+"
         r"(\$[\d,.]+|N/A)"
     )
@@ -743,8 +743,10 @@ def parse_investingpro_pdf(file_bytes):
             result["executive_summary"] = ki.pop("executive_summary", "")
         elif page_type == "valuation":
             val = _parse_valuation(page_text)
-            result["valuation"] = val.get("multiples", {})
-            result["pro_tips"] = val.get("pro_tips", [])
+            if not result.get("valuation"):
+                result["valuation"] = val.get("multiples", {})
+            if not result.get("pro_tips"):
+                result["pro_tips"] = val.get("pro_tips", [])
         elif page_type == "analyst":
             result["analyst"] = _parse_analyst(page_text)
         elif page_type == "financials_annual":

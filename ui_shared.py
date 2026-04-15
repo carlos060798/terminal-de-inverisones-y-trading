@@ -47,13 +47,19 @@ def score(key, val):
 
 
 def fmt(n, prefix="$", dec=2):
+    import streamlit as st
     if n is None or (isinstance(n, float) and pd.isna(n)):
         return "N/A"
-    if abs(n) >= 1e12: return f"{prefix}{n/1e12:.{dec}f}T"
-    if abs(n) >= 1e9:  return f"{prefix}{n/1e9:.{dec}f}B"
-    if abs(n) >= 1e6:  return f"{prefix}{n/1e6:.{dec}f}M"
-    if abs(n) >= 1e3:  return f"{prefix}{n/1e3:.{dec}f}K"
-    return f"{prefix}{n:.{dec}f}"
+    abs_n = abs(n)
+    mode = st.session_state.get("notation_mode", "Compacto (M/B)")
+    if mode == "Compacto (M/B)":
+        if abs_n >= 1e12: return f"{prefix}{n/1e12:.{dec}f}T"
+        if abs_n >= 1e9:  return f"{prefix}{n/1e9:.{dec}f}B"
+        if abs_n >= 1e6:  return f"{prefix}{n/1e6:.{dec}f}M"
+        if abs_n >= 1e3:  return f"{prefix}{n/1e3:.{dec}f}K"
+    if prefix == "%":
+        return f"{n:,.{dec}f}%"
+    return f"{prefix}{n:,.{dec}f}"
 
 
 def kpi(label, value, sub="", color="blue"):
@@ -63,3 +69,14 @@ def kpi(label, value, sub="", color="blue"):
       <div class='kpi-value'>{value}</div>
       <div class='kpi-sub kpi-{color}'>{sub}</div>
     </div>"""
+
+def badge(text, status="ok"):
+    """Render a premium badge (ok, error, warn)."""
+    cls = f"status-{status}"
+    return f"<span class='{cls}'>{text.upper()}</span>"
+
+def latency_label(ms):
+    """Render a colored latency label."""
+    if ms == 0: return "<span style='color:#64748b'>-</span>"
+    cls = "latency-low" if ms < 500 else "latency-high" if ms > 2000 else ""
+    return f"<span class='{cls}'>{ms}ms</span>"

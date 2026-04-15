@@ -126,6 +126,114 @@ def render_sparkline(data, height=30, width=100, color='#3b82f6'):
     )
     return fig
 
+def render_financial_statement_table(df):
+    """
+    Renderiza una tabla de estados de resultados premium estilo InvestingPro.
+    Incluye: Nombre métrica, Mini-Trend, y 5 años de historial.
+    """
+    import pandas as pd
+    from ui_shared import fmt
+    import base64
+    from io import BytesIO
+
+    if df is None or df.empty:
+        st.warning("No hay datos históricos para generar el estado financiero.")
+        return
+
+    # Preparar métricas a mostrar
+    metrics = [
+        ("Ingresos", "Revenue", "$"),
+        ("Cr. ingresos (YoY %)", "RevGrowth", "%"),
+        ("Coste de los ingresos", "COGS", "$"),
+        ("Utilidad bruta", "Gross Profit", "$"),
+        ("Margen bruto (%)", "GrossMarginPct", "%"),
+        ("Ingresos de explotación", "Operating Income", "$"),
+        ("Beneficio neto", "Net Income", "$"),
+        ("Margen neto (%)", "NetMarginPct", "%"),
+    ]
+
+    # Cálculo de métricas adicionales para la tabla
+    df = df.copy()
+    if "Revenue" in df.columns:
+        # Calcular crecimiento YoY (asumiendo que viene ordenado por año desc en sec_api, pero reversed(years) lo usará asc)
+        df = df.sort_values("Year")
+        df["RevGrowth"] = df["Revenue"].pct_change() * 100
+        df["GrossMarginPct"] = (df["Gross Profit"] / df["Revenue"]) * 100 if "Gross Profit" in df.columns else None
+        df["NetMarginPct"] = (df["Net Income"] / df["Revenue"]) * 100 if "Net Income" in df.columns else None
+
+    # Años disponibles (columnas)
+    years = sorted([c for c in df["Year"].unique()], reverse=True)[:5]
+    
+    # CSS para la tabla premium
+    st.markdown("""
+    <style>
+    .fin-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Inter', sans-serif;
+        color: #f1f5f9;
+        margin-bottom: 30px;
+    }
+    .fin-table th {
+        text-align: right;
+        padding: 12px 8px;
+        border-bottom: 2px solid #1e293b;
+        color: #94a3b8;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .fin-table th:first-child { text-align: left; }
+    .fin-table td {
+        padding: 12px 8px;
+        border-bottom: 1px solid #0f172a;
+        font-size: 14px;
+        text-align: right;
+    }
+    .fin-table td:first-child {
+        text-align: left;
+        font-weight: 500;
+        color: #cbd5e1;
+    }
+    .fin-table tr:hover { background: rgba(255,255,255,0.02); }
+    .metric-name { display: flex; align-items: center; gap: 8px; }
+    .spark-col { width: 50px; text-align: center !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    header_html = "<tr><th>Métrica</th><th class='spark-col'></th>"
+    for yr in years:
+        header_html += f"<th>{yr}</th>"
+    header_html += "</tr>"
+
+    rows_html = ""
+    for label, col, pref in metrics:
+        if col not in df.columns: continue
+        
+        # Obtener valores históricos para esta métrica
+        vals = []
+        for yr in reversed(years): # De viejo a nuevo para el sparkline
+            v = df[df["Year"] == yr][col].values
+            vals.append(v[0] if len(v) > 0 else 0)
+        
+        # Generar Sparkline base64
+        spark_img = ""
+        fig_spark = render_sparkline(vals, height=20, width=60, color='#3b82f6')
+        if fig_spark:
+            buf = BytesIO()
+            fig_spark.write_image(buf, format="png", scale=2)
+            spark_img = f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}" width="50">'
+        
+        row = f"<tr><td><div class='metric-name'>{label}</div></td><td class='spark-col'>{spark_img}</td>"
+        for yr in years:
+            v = df[df["Year"] == yr][col].values
+            val = v[0] if len(v) > 0 else None
+            row += f"<td>{fmt(val, pref)}</td>"
+        row += "</tr>"
+        rows_html += row
+
+    st.markdown(f"<table class='fin-table'>{header_html}{rows_html}</table>", unsafe_allow_html=True)
+
 def render_price_history(df):
     """Dibuja el gráfico de historial de precios principal."""
     if df is None or df.empty:

@@ -14,19 +14,19 @@ def create_technical_dashboard(df, ticker):
     - RSI
     - MACD
     """
-    if df.empty:
+    # Check for core columns
+    required = ['Open', 'High', 'Low', 'Close']
+    if not all(col in df.columns for col in required):
         return None
-        
-    # Check for required columns (calculated by quant/technical.py or similar)
-    # We expect: MA20, MA50, RSI, MACD, Signal, Hist, BB_upper, BB_lower
     
     fig = make_subplots(
-        rows=3, cols=1,
+        rows=4, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.02,
-        row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=(f"{ticker} - Precio & Bandas", "RSI (14)", "MACD")
+        row_heights=[0.5, 0.15, 0.15, 0.2],
+        subplot_titles=(f"{ticker} - Precio & Bandas", "RSI (14)", "MACD", "Presión de Volumen (Delta)")
     )
+
 
     # ── PANEL 1: PRECIO + MA + BOLLINGER ──
     # Price
@@ -64,6 +64,18 @@ def create_technical_dashboard(df, ticker):
         hist_colors = [COLORS["bull"] if h >= 0 else COLORS["bear"] for h in df['Hist'].fillna(0)]
         fig.add_trace(go.Bar(x=df.index, y=df['Hist'], name="Histograma", marker_color=hist_colors), row=3, col=1)
 
+    # ── PANEL 4: VOLUME DELTA ──
+    v_colors = [COLORS["bull"] if c >= o else COLORS["bear"] for c, o in zip(df['Close'], df['Open'])]
+    v_delta = [v if c >= o else -v for c, o, v in zip(df['Close'], df['Open'], df['Volume'])]
+    
+    fig.add_trace(go.Bar(
+        x=df.index, y=v_delta, 
+        name="Delta Vol", 
+        marker_color=v_colors,
+        opacity=0.8
+    ), row=4, col=1)
+
+
     # Layout tuning
     fig.update_layout(
         height=800,
@@ -74,8 +86,10 @@ def create_technical_dashboard(df, ticker):
     # Hide axis labels for upper charts to avoid clutter
     fig.update_xaxes(showticklabels=False, row=1, col=1)
     fig.update_xaxes(showticklabels=False, row=2, col=1)
+    fig.update_xaxes(showticklabels=False, row=3, col=1)
     
     return apply_theme(fig)
+
 
 def create_volume_profile(df, n_bins=50):
     """Creates a horizontal volume profile chart (Price vs Volume)."""

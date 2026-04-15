@@ -94,25 +94,38 @@ def get_configured_ids() -> List[str]:
 
 # ── Auto-discovery ───────────────────────────────────────────────────────────
 
-def autodiscover_providers() -> int:
+def autodiscover_providers(priority_filter: Optional[List[str]] = None) -> int:
     """
-    Import all modules under adapters/providers/ so their @register decorators
-    execute. Returns count of newly registered adapters.
-    Call once at app startup (e.g. in execution_engine.py __init__).
+    Import modules under adapters/providers/ to execute decorators.
+    If priority_filter is provided, only load modules whose provider_id
+    matches a prioritized list (logic: check static mapping or suffix).
+    
+    Deferred Start (Sprint 4):
+    To truly defer, we'd need a mapping or scan names. 
+    Here we implement a two-pass load if called with filters.
     """
     import adapters.providers as _pkg
     before = len(_REGISTRY)
+    
+    # Core providers to load in first pass for speed
+    CORE_HINTS = ["binance", "yfinance", "fred", "cboe", "market_pulse", "sentiment_finbert"]
 
     for finder, modname, ispkg in pkgutil.walk_packages(
         path=_pkg.__path__,
         prefix=_pkg.__name__ + ".",
         onerror=lambda name: logger.warning("Cannot import provider module: %s", name),
     ):
+        # If filtering for quick start, skip non-core modules based on name hint
+        if priority_filter == ["CORE"]:
+            is_core = any(hint in modname.lower() for hint in CORE_HINTS)
+            if not is_core:
+                continue
+
         try:
             importlib.import_module(modname)
         except Exception as exc:
             logger.warning("Failed to import %s: %s", modname, exc)
 
     added = len(_REGISTRY) - before
-    logger.info("autodiscover_providers: loaded %d adapters (%d total)", added, len(_REGISTRY))
+    logger.info("autodiscover_providers: loaded %d adapters (Pass: %s)", added, priority_filter or "FULL")
     return added
